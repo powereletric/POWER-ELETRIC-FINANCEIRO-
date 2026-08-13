@@ -250,10 +250,11 @@ function LoginScreen() {
    MODAL: NOVO LANÇAMENTO
    ============================================================ */
 function TransactionModal({ initialType, accounts, categories, currentUser, onClose, onSave }) {
+  const activeAccounts = accounts.filter((a) => a.active);
   const [type, setType] = useState(initialType);
   const [date, setDate] = useState(todayISO());
-  const [conta, setConta] = useState(accounts[0]?.id || "");
-  const [contaDestino, setContaDestino] = useState(accounts[1]?.id || accounts[0]?.id || "");
+  const [conta, setConta] = useState(activeAccounts[0]?.id || "");
+  const [contaDestino, setContaDestino] = useState(activeAccounts[1]?.id || activeAccounts[0]?.id || "");
   const [valor, setValor] = useState("");
   const [categoria, setCategoria] = useState(categories[0]?.name || "");
   const [pessoa, setPessoa] = useState("");
@@ -264,7 +265,7 @@ function TransactionModal({ initialType, accounts, categories, currentUser, onCl
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const activeAccounts = accounts.filter((a) => a.active);
+
   const activeCategories = categories.filter((c) => c.active);
 
   const typeMeta = {
