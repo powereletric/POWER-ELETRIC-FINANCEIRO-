@@ -568,17 +568,25 @@ function PagamentoReembolsoModal({ reembolso, accounts, currentUser, onClose, on
    VIEW: DASHBOARD
    ============================================================ */
 const CATEGORY_EMOJI = [
+  [/ped[aá]gio|deslocamento/i, "🛣️"],
   [/alimenta/i, "🍽️"], [/combust/i, "⛽"], [/sal[aá]rio/i, "👷"], [/manuten|pneu/i, "🔧"],
   [/fornecedor/i, "🧾"], [/imposto|taxa/i, "🏛️"], [/s[oó]cio/i, "👥"], [/reembolso/i, "↩️"],
   [/transporte|frete/i, "🚚"], [/material|equipamento/i, "🧰"], [/hospedagem/i, "🏨"],
   [/jur[ií]dico/i, "⚖️"], [/contabilidade/i, "📑"], [/servi[cç]o/i, "🛠️"], [/adiantamento/i, "💵"],
+  [/viagem/i, "✈️"],
 ];
 function categoryEmoji(name) {
   const hit = CATEGORY_EMOJI.find(([re]) => re.test(name || ""));
   return hit ? hit[1] : "📂";
 }
-
-function DashboardView({ accounts, transactions, engine, onQuickAction, role }) {
+// Prioriza o emoji escolhido manualmente na categoria; se não tiver, tenta adivinhar pelo nome
+function resolveCategoryEmoji(categories, name) {
+  const cat = (categories || []).find((c) => c.name === name);
+  if (cat?.emoji) return cat.emoji;
+  return categoryEmoji(name);
+}
+const QUICK_EMOJIS = ["🍽️", "⛽", "🛣️", "👷", "🔧", "🧾", "🏛️", "👥", "↩️", "🚚", "🧰", "🏨", "⚖️", "📑", "🛠️", "💵", "✈️", "📂", "🏦", "💳", "🛒", "📦", "🧹", "🎓"];
+function DashboardView({ accounts, transactions, engine, onQuickAction, role, categories }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -653,7 +661,7 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role }) 
             {despesasPorCategoria.map((c) => (
               <button key={c.name} onClick={() => { setDrill("despesas"); setDrillCategoria(c.name); }} className="fin-btn fin-card fin-focus text-left rounded-xl">
                 <Card>
-                  <p className="text-xs truncate" style={{ color: "var(--ink-soft)" }}>{categoryEmoji(c.name)} {c.name}</p>
+                  <p className="text-xs truncate" style={{ color: "var(--ink-soft)" }}>{resolveCategoryEmoji(categories, c.name)} {c.name}</p>
                   <Money v={c.value} tone="neg" />
                 </Card>
               </button>
@@ -921,16 +929,44 @@ function ContasView({ accounts, engine, onAdd, onToggleActive, canManage }) {
 /* ============================================================
    VIEW: CATEGORIAS
    ============================================================ */
-function CategoriasView({ categories, onAdd, onToggleActive, canManage }) {
+function EmojiPicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="fin-focus fin-btn flex items-center justify-center rounded-lg"
+        style={{ ...inputStyle, width: 46, height: 40, padding: 0, fontSize: 18 }}>
+        {value || "📂"}
+      </button>
+      {open && (
+        <div className="absolute z-10 mt-1 p-2 rounded-lg grid grid-cols-6 gap-1" style={{ background: "var(--panel)", border: "1px solid var(--line)", boxShadow: "0 8px 24px rgba(18,33,59,0.15)" }}>
+          {QUICK_EMOJIS.map((e) => (
+            <button key={e} type="button" onClick={() => { onChange(e); setOpen(false); }} className="fin-focus rounded-md p-1.5 text-lg hover:opacity-70">{e}</button>
+          ))}
+          <div className="col-span-6 mt-1 pt-1" style={{ borderTop: "1px solid var(--line)" }}>
+            <TextInput value={value} onChange={(e) => onChange(e.target.value)} placeholder="Ou cole outro emoji aqui" style={{ fontSize: 14 }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoriasView({ categories, onAdd, onToggleActive, onUpdateEmoji, canManage }) {
   const [name, setName] = useState("");
+  const [emoji, setEmoji] = useState("");
   const [saving, setSaving] = useState(false);
-  const submit = async () => { if (!name.trim()) return; setSaving(true); await onAdd({ name: name.trim(), active: true }); setSaving(false); setName(""); };
+  const submit = async () => { if (!name.trim()) return; setSaving(true); await onAdd({ name: name.trim(), active: true, emoji: emoji || null }); setSaving(false); setName(""); setEmoji(""); };
   return (
     <div className="space-y-4">
       <Card className="p-0 overflow-hidden">
         {categories.map((c, i) => (
           <div key={c.id} className="flex items-center justify-between px-4 py-2.5" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
-            <span className={c.active ? "" : "line-through"} style={{ color: c.active ? "var(--ink)" : "var(--ink-soft)" }}>{c.name}</span>
+            <div className="flex items-center gap-2">
+              {canManage
+                ? <EmojiPicker value={c.emoji || categoryEmoji(c.name)} onChange={(e) => onUpdateEmoji(c, e)} />
+                : <span style={{ fontSize: 16 }}>{c.emoji || categoryEmoji(c.name)}</span>}
+              <span className={c.active ? "" : "line-through"} style={{ color: c.active ? "var(--ink)" : "var(--ink-soft)" }}>{c.name}</span>
+            </div>
             {canManage && <Btn variant="ghost" onClick={() => onToggleActive(c)}>{c.active ? "Desativar" : "Ativar"}</Btn>}
           </div>
         ))}
@@ -938,6 +974,7 @@ function CategoriasView({ categories, onAdd, onToggleActive, canManage }) {
       {canManage && (
         <Card>
           <div className="flex gap-2 items-end">
+            <EmojiPicker value={emoji} onChange={setEmoji} />
             <div className="flex-1"><Field label="Nova categoria"><TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Marketing" /></Field></div>
             <Btn variant="gold" icon={Plus} onClick={submit} disabled={saving}>Adicionar</Btn>
           </div>
@@ -1269,12 +1306,17 @@ export default function App() {
     if (error) setErrorBanner("Não consegui atualizar a conta: " + error.message);
   };
   const addCategory = async (c) => {
-    const { error } = await supabase.from("categories").insert({ name: c.name, active: c.active });
+    const { error } = await supabase.from("categories").insert({ name: c.name, active: c.active, emoji: c.emoji || null });
     if (error) setErrorBanner("Não consegui adicionar a categoria: " + error.message);
   };
   const toggleCategoryActive = async (c) => {
     const { error } = await supabase.from("categories").update({ active: !c.active }).eq("id", c.id);
     if (error) setErrorBanner("Não consegui atualizar a categoria: " + error.message);
+  };
+  const updateCategoryEmoji = async (c, emoji) => {
+    setCategories((prev) => prev.map((x) => (x.id === c.id ? { ...x, emoji } : x))); // atualiza a tela na hora
+    const { error } = await supabase.from("categories").update({ emoji }).eq("id", c.id);
+    if (error) setErrorBanner("Não consegui salvar o emoji: " + error.message);
   };
   const changeRole = async (u, role) => {
     const { error } = await supabase.from("profiles").update({ role }).eq("id", u.id);
@@ -1345,12 +1387,12 @@ export default function App() {
 
           {errorBanner && <Card className="mb-4" style={{ background: "var(--red-soft)", border: "none" }}><p className="text-sm" style={{ color: "var(--red)" }}>{errorBanner}</p></Card>}
 
-          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} />}
+          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} categories={categories} />}
           {tab === "fluxo" && <FluxoCaixaView transactions={transactions} accounts={accounts} categories={categories} onToggleConferido={toggleConferido} onDelete={deleteTransaction} onEdit={(t) => setModal({ kind: "edit-tx", tx: t })} canDelete={role.canDelete} />}
           {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} />}
           {tab === "reembolsos" && <ReembolsosView engine={engine} onPagar={(r) => setModal({ kind: "reembolso", reembolso: r })} />}
           {tab === "contas" && <ContasView accounts={accounts} engine={engine} onAdd={addAccount} onToggleActive={toggleAccountActive} canManage={role.canManageConfig} />}
-          {tab === "categorias" && <CategoriasView categories={categories} onAdd={addCategory} onToggleActive={toggleCategoryActive} canManage={role.canManageConfig} />}
+          {tab === "categorias" && <CategoriasView categories={categories} onAdd={addCategory} onToggleActive={toggleCategoryActive} onUpdateEmoji={updateCategoryEmoji} canManage={role.canManageConfig} />}
           {tab === "relatorios" && <RelatoriosView transactions={transactions} accounts={accounts} engine={engine} />}
           {tab === "config" && <ConfiguracoesView profiles={profiles} currentUser={currentUser} onChangeRole={changeRole} />}
         </div>
