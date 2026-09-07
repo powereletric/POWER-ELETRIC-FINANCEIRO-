@@ -27,6 +27,7 @@ const ROLES = {
 
 const fmtBRL = (v) => (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const todayISO = () => new Date().toISOString().slice(0, 10);
+const fmtDate = (iso) => { if (!iso) return "—"; const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; };
 const monthLabel = (m, y) => new Date(y, m - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 
 /* ---------- mapeamento camelCase (app) <-> snake_case (banco) ---------- */
@@ -356,7 +357,6 @@ function TransactionModal({ initialType, accounts, categories, currentUser, onCl
       <Field label={type === "adiantamento" ? "Pessoa que vai receber o adiantamento" : "Pessoa / beneficiário"}>
         <TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} placeholder="Nome" />
       </Field>
-      <Field label="Descrição"><TextInput value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex: Combustível posto Naza" /></Field>
       <Field label="Nº documento / observação">
         <div className="grid grid-cols-2 gap-2">
           <TextInput value={documento} onChange={(e) => setDocumento(e.target.value)} placeholder="Nº NF, recibo..." />
@@ -637,7 +637,7 @@ function DashboardView({ accounts, transactions, engine, onQuickAction }) {
                   <div>
                     <p className="text-sm font-medium">{t.pessoa || t.descricao || "Recebimento"}</p>
                     <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
-                      {t.date} · {accName(accounts, t.conta)}{t.documento ? ` · Doc. ${t.documento}` : ""}{t.categoria ? ` · ${t.categoria}` : ""}
+                      {fmtDate(t.date)} · {accName(accounts, t.conta)}{t.documento ? ` · Doc. ${t.documento}` : ""}{t.categoria ? ` · ${t.categoria}` : ""}
                     </p>
                   </div>
                   <Money v={t.valor} tone="pos" size="sm" />
@@ -675,11 +675,11 @@ function DashboardView({ accounts, transactions, engine, onQuickAction }) {
               .map((t) => (
                 <div key={t.id} className="py-2.5">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">{t.descricao || "—"}{t.pessoa ? ` · ${t.pessoa}` : ""}</p>
+                    <p className="text-sm font-medium">{t.descricao ? (t.descricao + (t.pessoa ? ` · ${t.pessoa}` : "")) : (t.pessoa || "—")}</p>
                     <Money v={t.valor} tone="neg" size="sm" />
                   </div>
                   <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
-                    {t.date} · {accName(accounts, t.conta)}{t.documento ? ` · Doc. ${t.documento}` : ""}
+                    {fmtDate(t.date)} · {accName(accounts, t.conta)}{t.documento ? ` · Doc. ${t.documento}` : ""}
                   </p>
                 </div>
               ))}
@@ -763,9 +763,9 @@ function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, o
                 {["Data", "Tipo", "Descrição", "Conta", "Categoria", "Entrada", "Saída"].map((h) => (
                   <th key={h} className="text-left px-3 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
                 ))}
-                <th className="text-center px-2 py-2 font-medium text-xs whitespace-nowrap" style={{ position: "sticky", right: 76, background: "#F0ECE0", boxShadow: "-4px 0 4px -2px rgba(0,0,0,0.08)" }}>Conf.</th>
-                <th className="px-2 py-2" style={{ position: "sticky", right: 38, background: "#F0ECE0" }}></th>
-                <th className="px-2 py-2" style={{ position: "sticky", right: 0, background: "#F0ECE0" }}></th>
+                <th className="text-center px-2 py-2 font-medium text-xs whitespace-nowrap" style={{ position: "sticky", right: 80, width: 40, minWidth: 40, maxWidth: 40, background: "#F0ECE0", boxShadow: "-4px 0 4px -2px rgba(0,0,0,0.08)", zIndex: 2 }}>Conf.</th>
+                <th className="px-2 py-2" style={{ position: "sticky", right: 40, width: 40, minWidth: 40, maxWidth: 40, background: "#F0ECE0", zIndex: 2 }}></th>
+                <th className="px-2 py-2" style={{ position: "sticky", right: 0, width: 40, minWidth: 40, maxWidth: 40, background: "#F0ECE0", zIndex: 2 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -775,25 +775,27 @@ function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, o
                 const contaTxt = t.type === "transferencia" ? `${accName(accounts, t.contaOrigem)} → ${accName(accounts, t.contaDestino)}` : accName(accounts, t.conta);
                 return (
                   <tr key={t.id} className="border-t" style={{ borderColor: "var(--line)" }}>
-                    <td className="px-3 py-2 whitespace-nowrap fin-mono text-xs">{t.date}</td>
+                    <td className="px-3 py-2 whitespace-nowrap fin-mono text-xs">{fmtDate(t.date)}</td>
                     <td className="px-3 py-2 whitespace-nowrap"><Pill tone={meta?.tone}>{meta?.label}</Pill></td>
                     <td className="px-3 py-2 max-w-[220px] truncate" title={t.descricao}>
-                      {t.descricao || <span style={{ color: "var(--ink-soft)" }}>—</span>}{t.pessoa ? <span style={{ color: "var(--ink-soft)" }}> · {t.pessoa}</span> : ""}
+                      {t.descricao
+                        ? <>{t.descricao}{t.pessoa ? <span style={{ color: "var(--ink-soft)" }}> · {t.pessoa}</span> : ""}</>
+                        : (t.pessoa || <span style={{ color: "var(--ink-soft)" }}>—</span>)}
                       {t.type === "despesa" && t.pendenteReembolso && <span className="ml-1"><Pill tone="amber">reembolso pendente</Pill></span>}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap text-xs">{contaTxt}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-xs">{t.categoria || "—"}</td>
                     <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--green)" }}>{["receita", "devolucao_adiantamento", "transferencia"].includes(t.type) ? fmtBRL(t.valor) : ""}</td>
                     <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--red)" }}>{((t.type === "despesa" && !t.pendenteReembolso) || t.type === "adiantamento" || t.type === "reembolso_pagamento") ? fmtBRL(t.valor) : ""}</td>
-                    <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 76, background: "var(--panel)", boxShadow: "-4px 0 4px -2px rgba(0,0,0,0.08)" }}>
+                    <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 80, width: 40, minWidth: 40, maxWidth: 40, background: "var(--panel)", boxShadow: "-4px 0 4px -2px rgba(0,0,0,0.08)", zIndex: 1 }}>
                       <button onClick={() => onToggleConferido(t)} className="fin-focus" title="Marcar conferido">
                         {t.conferido ? <Check size={16} style={{ color: "var(--green)" }} /> : <Clock size={16} style={{ color: "var(--ink-soft)" }} />}
                       </button>
                     </td>
-                    <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 38, background: "var(--panel)" }}>
+                    <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 40, width: 40, minWidth: 40, maxWidth: 40, background: "var(--panel)", zIndex: 1 }}>
                       <button onClick={() => onEdit(t)} className="fin-focus" title="Editar"><Edit2 size={15} style={{ color: "var(--ink-soft)" }} /></button>
                     </td>
-                    <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 0, background: "var(--panel)" }}>
+                    <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 0, width: 40, minWidth: 40, maxWidth: 40, background: "var(--panel)", zIndex: 1 }}>
                       {canDelete && <button onClick={() => onDelete(t)} className="fin-focus" title="Excluir"><Trash2 size={15} style={{ color: "var(--red)" }} /></button>}
                     </td>
                   </tr>
@@ -964,7 +966,7 @@ function AdiantamentosView({ engine, accounts, onBaixa, onDevolucao }) {
             {abertos.map((a) => (
               <Card key={a.id}>
                 <div className="flex justify-between items-start">
-                  <div><p className="font-semibold">{a.pessoa}</p><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Enviado em {a.date} · {accName(accounts, a.conta)}</p></div>
+                  <div><p className="font-semibold">{a.pessoa}</p><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Enviado em {fmtDate(a.date)} · {accName(accounts, a.conta)}</p></div>
                   <Pill tone="amber">a prestar contas</Pill>
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
@@ -986,7 +988,7 @@ function AdiantamentosView({ engine, accounts, onBaixa, onDevolucao }) {
           <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Quitados</p>
           <div className="grid md:grid-cols-2 gap-3">
             {quitados.map((a) => (
-              <Card key={a.id} style={{ opacity: 0.7 }}><p className="font-semibold">{a.pessoa}</p><p className="text-xs" style={{ color: "var(--ink-soft)" }}>{a.date} · <Money v={a.valor} size="sm" /> totalmente prestado</p></Card>
+              <Card key={a.id} style={{ opacity: 0.7 }}><p className="font-semibold">{a.pessoa}</p><p className="text-xs" style={{ color: "var(--ink-soft)" }}>{fmtDate(a.date)} · <Money v={a.valor} size="sm" /> totalmente prestado</p></Card>
             ))}
           </div>
         </div>
@@ -1009,7 +1011,7 @@ function ReembolsosView({ engine, onPagar }) {
               <div key={r.id} className="flex items-center justify-between px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
                 <div>
                   <p className="font-medium text-sm">{r.pessoa} <Pill tone={statusTone[r.status]}>{r.status}</Pill></p>
-                  <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{r.descricao || r.categoria} · {r.date}</p>
+                  <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{r.descricao || r.categoria} · {fmtDate(r.date)}</p>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right text-xs"><p>Total: <Money v={r.valor} size="sm" /></p><p>Restante: <Money v={r.restante} size="sm" tone="neg" /></p></div>
