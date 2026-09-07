@@ -5,7 +5,7 @@ import {
   Landmark, BarChart3, Settings, Plus, X, Check, Clock, AlertCircle,
   ChevronDown, LogOut, Lock, Trash2, Edit2, HandCoins, Receipt,
   ListChecks, Eye, EyeOff, ArrowUpCircle, ArrowDownCircle, ArrowRightLeft,
-  Mail, CreditCard, ShieldCheck, Printer
+  Mail, CreditCard, ShieldCheck, Printer, Banknote
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -1919,6 +1919,274 @@ function AprovacoesView({ pendingEdits, transactions, isAdmin, onApprove, onReje
 }
 
 /* ============================================================
+   RH — FUNCIONÁRIOS
+   ============================================================ */
+const CONTRATO_OPCOES = ["CLT", "PJ", "Temporário", "Estagiário", "Outro"];
+
+function NovoFuncionarioModal({ onClose, onSave, editing }) {
+  const [nome, setNome] = useState(editing?.nome || "");
+  const [cargo, setCargo] = useState(editing?.cargo || "");
+  const [tipoContrato, setTipoContrato] = useState(editing?.tipo_contrato || "CLT");
+  const [salarioBase, setSalarioBase] = useState(editing ? String(editing.salario_base).replace(".", ",") : "");
+  const [periculosidade, setPericulosidade] = useState(editing?.periculosidade_insalubridade || "");
+  const [valorAdicional, setValorAdicional] = useState(editing?.valor_adicional ? String(editing.valor_adicional).replace(".", ",") : "");
+  const [unidade, setUnidade] = useState(editing?.unidade || "");
+  const [dataAdmissao, setDataAdmissao] = useState(editing?.data_admissao || todayISO());
+  const [observacoes, setObservacoes] = useState(editing?.observacoes || "");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    const sal = parseFloat(String(salarioBase).replace(",", "."));
+    if (!nome.trim()) { setErr("Informe o nome."); return; }
+    if (!sal || sal <= 0) { setErr("Informe um salário-base válido."); return; }
+    setSaving(true);
+    const ok = await onSave({
+      nome: nome.trim(), cargo: cargo.trim(), tipo_contrato: tipoContrato, salario_base: sal,
+      periculosidade_insalubridade: periculosidade || null,
+      valor_adicional: parseFloat(String(valorAdicional).replace(",", ".")) || 0,
+      unidade: unidade.trim(), data_admissao: dataAdmissao, observacoes: observacoes.trim(), status: "ativo",
+    });
+    setSaving(false);
+    if (!ok) setErr("Não consegui salvar. Tente novamente.");
+  };
+
+  return (
+    <Modal title={editing ? "Editar funcionário" : "Novo funcionário"} onClose={onClose}>
+      <Field label="Nome" required><TextInput value={nome} onChange={(e) => setNome(e.target.value)} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Cargo/função"><TextInput value={cargo} onChange={(e) => setCargo(e.target.value)} /></Field>
+        <Field label="Tipo de contrato"><Select value={tipoContrato} onChange={(e) => setTipoContrato(e.target.value)}>{CONTRATO_OPCOES.map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Salário-base (R$)" required><TextInput inputMode="decimal" value={salarioBase} onChange={(e) => setSalarioBase(e.target.value)} placeholder="0,00" /></Field>
+        <Field label="Data de admissão"><TextInput type="date" value={dataAdmissao} onChange={(e) => setDataAdmissao(e.target.value)} /></Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Periculosidade/Insalubridade">
+          <Select value={periculosidade} onChange={(e) => setPericulosidade(e.target.value)}>
+            <option value="">Nenhum</option><option value="periculosidade">Periculosidade</option><option value="insalubridade">Insalubridade</option>
+          </Select>
+        </Field>
+        <Field label="Valor/percentual do adicional (R$)"><TextInput inputMode="decimal" value={valorAdicional} onChange={(e) => setValorAdicional(e.target.value)} placeholder="0,00" /></Field>
+      </div>
+      <Field label="Unidade/local de trabalho"><TextInput value={unidade} onChange={(e) => setUnidade(e.target.value)} /></Field>
+      <Field label="Observações"><TextInput value={observacoes} onChange={(e) => setObservacoes(e.target.value)} /></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Salvando..." : "Salvar"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function FuncionariosView({ employees, canManage, onAdd, onEdit, onToggleStatus }) {
+  const [q, setQ] = useState("");
+  const [modal, setModal] = useState(null);
+  const ativos = employees.filter((e) => e.status === "ativo");
+  const inativos = employees.filter((e) => e.status === "inativo");
+  const filtro = (list) => list.filter((e) => !q.trim() || `${e.nome} ${e.cargo}`.toLowerCase().includes(q.toLowerCase()));
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-2 items-center">
+        <TextInput placeholder="Buscar por nome ou cargo..." value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
+        {canManage && <Btn variant="gold" icon={Plus} className="ml-auto" onClick={() => setModal({ kind: "novo" })}>Novo funcionário</Btn>}
+      </div>
+      <Card className="p-0 overflow-hidden">
+        {filtro(ativos).length === 0 ? <div className="p-4"><EmptyState text="Nenhum funcionário ativo encontrado." /></div> : filtro(ativos).map((f, i) => (
+          <div key={f.id} className="flex items-center justify-between px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
+            <div>
+              <p className="text-sm font-medium">{f.nome} {f.periculosidade_insalubridade && <Pill tone="amber">{f.periculosidade_insalubridade}</Pill>}</p>
+              <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{f.cargo || "—"} · {f.tipo_contrato} · {f.unidade || "—"} · admitido em {fmtDate(f.data_admissao)}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Money v={f.salario_base} size="sm" />
+              {canManage && (
+                <>
+                  <Btn variant="ghost" onClick={() => setModal({ kind: "editar", employee: f })}>Editar</Btn>
+                  <Btn variant="ghost" onClick={() => onToggleStatus(f)}>Desativar</Btn>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </Card>
+      {inativos.length > 0 && (
+        <div>
+          <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Inativos</p>
+          <Card className="p-0 overflow-hidden">
+            {filtro(inativos).map((f, i) => (
+              <div key={f.id} className="flex items-center justify-between px-4 py-2.5 text-sm" style={{ borderTop: i ? "1px solid var(--line)" : "none", opacity: 0.7 }}>
+                <span>{f.nome}</span>
+                {canManage && <Btn variant="ghost" onClick={() => onToggleStatus(f)}>Reativar</Btn>}
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+      {modal?.kind === "novo" && <NovoFuncionarioModal onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "editar" && <NovoFuncionarioModal editing={modal.employee} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onEdit(modal.employee, d); if (ok) setModal(null); return ok; }} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   RH — FOLHA DE PAGAMENTO
+   ============================================================ */
+function payrollTotal(p) {
+  return (p.salario || 0) + (p.adiantamento || 0) + (p.vale_mercado || 0) + (p.horas_extras || 0) + (p.ajuda_custo || 0) + (p.outros_proventos || 0) - (p.descontos || 0);
+}
+function payrollStatus(p, pago) {
+  const total = payrollTotal(p);
+  if (pago >= total - 0.009 && total > 0) return "pago";
+  if (pago > 0.009) return "parcial";
+  if ((p.data_prevista_pagamento || "") < todayISO()) return "atrasado";
+  return "previsto";
+}
+const PAYROLL_STATUS_META = {
+  previsto: { label: "Previsto", tone: "amber" }, parcial: { label: "Parcial", tone: "teal" },
+  pago: { label: "Pago", tone: "green" }, atrasado: { label: "Atrasado", tone: "red" },
+};
+
+function RegistrarPagamentoFolhaModal({ entry, funcionario, pendente, accounts, onClose, onSave }) {
+  const [dataPagamento, setDataPagamento] = useState(todayISO());
+  const [valorPago, setValorPago] = useState(String(pendente.toFixed(2)).replace(".", ","));
+  const [conta, setConta] = useState(accounts[0]?.id || "");
+  const [observacao, setObservacao] = useState("");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    const v = parseFloat(String(valorPago).replace(",", "."));
+    if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
+    if (!conta) { setErr("Selecione a conta."); return; }
+    setSaving(true);
+    const ok = await onSave(entry, { dataPagamento, valorPago: v, conta, observacao: observacao.trim() });
+    setSaving(false);
+    if (!ok) setErr("Não consegui registrar. Tente novamente.");
+  };
+
+  return (
+    <Modal title={`Registrar pagamento — ${funcionario.nome}`} onClose={onClose}>
+      <Card className="mb-4" style={{ background: "var(--amber-soft)", border: "none" }}>
+        <p className="text-sm">Total a pagar: <Money v={payrollTotal(entry)} size="sm" /> · Pendente: <Money v={pendente} size="sm" tone="neg" /></p>
+      </Card>
+      <Field label="Data do pagamento" required><TextInput type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} /></Field>
+      <Field label="Valor pago (R$)" required><TextInput inputMode="decimal" value={valorPago} onChange={(e) => setValorPago(e.target.value)} /></Field>
+      <Field label="Conta utilizada" required><Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+      <Field label="Observação"><TextInput value={observacao} onChange={(e) => setObservacao(e.target.value)} /></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Registrando..." : "Confirmar pagamento"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function FolhaRow({ entry, funcionario, pagamentos, accounts, canManage, onUpdateField, onPagar }) {
+  const [local, setLocal] = useState({
+    adiantamento: entry.adiantamento, vale_mercado: entry.vale_mercado, horas_extras: entry.horas_extras,
+    ajuda_custo: entry.ajuda_custo, outros_proventos: entry.outros_proventos, descontos: entry.descontos,
+  });
+  const pago = pagamentos.filter((p) => p.payroll_entry_id === entry.id).reduce((s, p) => s + p.valor_pago, 0);
+  const total = payrollTotal({ ...entry, ...local });
+  const pendente = total - pago;
+  const status = payrollStatus({ ...entry, ...local }, pago);
+  const meta = PAYROLL_STATUS_META[status];
+
+  const commit = (field) => {
+    const v = parseFloat(String(local[field]).toString().replace(",", ".")) || 0;
+    if (v !== entry[field]) onUpdateField(entry, field, v);
+  };
+  const numInput = (field, w = 90) => (
+    <TextInput inputMode="decimal" disabled={!canManage} value={local[field]} style={{ width: w, padding: "6px 8px", fontSize: 13 }}
+      onChange={(e) => setLocal((s) => ({ ...s, [field]: e.target.value }))} onBlur={() => commit(field)} />
+  );
+
+  return (
+    <tr className="border-t" style={{ borderColor: "var(--line)" }}>
+      <td className="px-3 py-2 text-sm whitespace-nowrap">{funcionario?.nome || "—"}</td>
+      <td className="px-3 py-2 fin-mono text-xs whitespace-nowrap">{fmtBRL(entry.salario)}</td>
+      <td className="px-2 py-2">{numInput("adiantamento")}</td>
+      <td className="px-2 py-2">{numInput("vale_mercado")}</td>
+      <td className="px-2 py-2">{numInput("horas_extras")}</td>
+      <td className="px-2 py-2">{numInput("ajuda_custo")}</td>
+      <td className="px-2 py-2">{numInput("outros_proventos")}</td>
+      <td className="px-2 py-2">{numInput("descontos")}</td>
+      <td className="px-3 py-2 fin-mono text-xs font-semibold whitespace-nowrap">{fmtBRL(total)}</td>
+      <td className="px-3 py-2 fin-mono text-xs whitespace-nowrap" style={{ color: "var(--green)" }}>{fmtBRL(pago)}</td>
+      <td className="px-3 py-2 fin-mono text-xs whitespace-nowrap" style={{ color: pendente > 0.009 ? "var(--red)" : "var(--ink-soft)" }}>{fmtBRL(Math.max(0, pendente))}</td>
+      <td className="px-2 py-2 whitespace-nowrap"><Pill tone={meta.tone}>{meta.label}</Pill></td>
+      <td className="px-2 py-2 whitespace-nowrap">
+        {canManage && pendente > 0.009 && <Btn variant="gold" onClick={() => onPagar(entry, funcionario, pendente)}>Pagar</Btn>}
+      </td>
+    </tr>
+  );
+}
+
+function FolhaPagamentoView({ employees, payrollEntries, payrollPayments, accounts, canManage, onEnsureEntries, onUpdateField, onPagar }) {
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [modal, setModal] = useState(null);
+  const competencia = `${year}-${String(month).padStart(2, "0")}-01`;
+  const ativos = employees.filter((e) => e.status === "ativo");
+
+  useEffect(() => { onEnsureEntries(competencia, ativos); }, [competencia]); // eslint-disable-line
+
+  const entriesDoMes = payrollEntries.filter((p) => p.competencia === competencia);
+  const totals = entriesDoMes.reduce((acc, e) => {
+    const pago = payrollPayments.filter((p) => p.payroll_entry_id === e.id).reduce((s, p) => s + p.valor_pago, 0);
+    const total = payrollTotal(e);
+    acc.total += total; acc.pago += pago; acc.pendente += Math.max(0, total - pago);
+    if (payrollStatus(e, pago) === "atrasado") acc.atrasadas += 1;
+    return acc;
+  }, { total: 0, pago: 0, pendente: 0, atrasadas: 0 });
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ width: 160 }}>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{new Date(2000, m - 1, 1).toLocaleDateString("pt-BR", { month: "long" })}</option>)}
+        </Select>
+        <Select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 110 }}>{[year - 1, year, year + 1].map((y) => <option key={y} value={y}>{y}</option>)}</Select>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total da folha</p><Money v={totals.total} tone="neg" /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Já pago</p><Money v={totals.pago} tone="pos" /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Pendente</p><Money v={totals.pendente} tone="neg" /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Atrasadas</p><p className="fin-mono text-xl font-semibold" style={{ color: totals.atrasadas > 0 ? "var(--red)" : "var(--ink)" }}>{totals.atrasadas}</p></Card>
+      </div>
+      <Card className="p-0 overflow-hidden">
+        <div className="fin-scroll overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
+                {["Funcionário", "Salário", "Adiant.", "Vale merc.", "H. extras", "Ajuda custo", "Outros", "Descontos", "Total", "Pago", "Pendente", "Status", ""].map((h) => (
+                  <th key={h} className="text-left px-2 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {entriesDoMes.length === 0 && <tr><td colSpan={13}><EmptyState text="Nenhum funcionário ativo nesta competência." /></td></tr>}
+              {entriesDoMes.map((entry) => (
+                <FolhaRow key={entry.id} entry={entry} funcionario={ativos.find((f) => f.id === entry.funcionario_id)}
+                  pagamentos={payrollPayments} accounts={accounts.filter((a) => a.active)} canManage={canManage}
+                  onUpdateField={onUpdateField} onPagar={(e, f, pend) => setModal({ entry: e, funcionario: f, pendente: pend })} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      {modal && <RegistrarPagamentoFolhaModal entry={modal.entry} funcionario={modal.funcionario} pendente={modal.pendente} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (e, p) => { const ok = await onPagar(e, p); if (ok) setModal(null); return ok; }} />}
+    </div>
+  );
+}
+
+/* ============================================================
    VIEW: CONFIGURAÇÕES
    ============================================================ */
 function ConfiguracoesView({ profiles, currentUser, onChangeRole }) {
@@ -1979,6 +2247,8 @@ const NAV = [
   { key: "contas", label: "Contas", icon: Landmark },
   { key: "categorias", label: "Categorias", icon: BarChart3 },
   { key: "relatorios", label: "Relatórios", icon: BarChart3 },
+  { key: "funcionarios", label: "Funcionários", icon: Users },
+  { key: "folha", label: "Folha de Pagamento", icon: Banknote },
   { key: "config", label: "Configurações", icon: Settings },
 ];
 // Sócios (Elisângela, Gilmar) veem uma navegação simplificada — só visão gerencial, sem telas operacionais
@@ -1986,6 +2256,8 @@ const NAV_SOCIO = [
   { key: "dashboard", label: "Dashboard", icon: Home },
   { key: "despesas-previstas", label: "Despesas Previstas", icon: TrendingDown },
   { key: "contas-receber", label: "Contas a Receber", icon: Wallet },
+  { key: "funcionarios", label: "Funcionários", icon: Users },
+  { key: "folha", label: "Folha de Pagamento", icon: Banknote },
   { key: "relatorios", label: "Relatórios", icon: BarChart3 },
   { key: "contas", label: "Contas", icon: Landmark },
 ];
@@ -2000,6 +2272,9 @@ export default function App() {
   const [despesasPrevistas, setDespesasPrevistas] = useState([]);
   const [contasReceber, setContasReceber] = useState([]);
   const [recurringExpenses, setRecurringExpenses] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [payrollEntries, setPayrollEntries] = useState([]);
+  const [payrollPayments, setPayrollPayments] = useState([]);
   const [pendingEdits, setPendingEdits] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
@@ -2022,7 +2297,7 @@ export default function App() {
 
     async function loadAll() {
       setDataLoading(true);
-      const [{ data: profileRows }, { data: accountRows }, { data: categoryRows }, { data: txRows }, { data: despesasPrevistasRows }, { data: contasReceberRows }, { data: recurringRows }, { data: pendingEditsRows }] = await Promise.all([
+      const [{ data: profileRows }, { data: accountRows }, { data: categoryRows }, { data: txRows }, { data: despesasPrevistasRows }, { data: contasReceberRows }, { data: recurringRows }, { data: pendingEditsRows }, { data: employeeRows }, { data: payrollRows }, { data: payrollPaymentRows }] = await Promise.all([
         supabase.from("profiles").select("*").order("name"),
         supabase.from("accounts").select("*").order("created_at"),
         supabase.from("categories").select("*").order("name"),
@@ -2031,6 +2306,9 @@ export default function App() {
         supabase.from("revenue_forecast").select("*").order("data_prevista_recebimento"),
         supabase.from("recurring_expenses").select("*").order("dia_vencimento"),
         supabase.from("pending_edits").select("*").order("requested_at", { ascending: false }),
+        supabase.from("employees").select("*").order("nome"),
+        supabase.from("payroll_entries").select("*"),
+        supabase.from("payroll_payments").select("*"),
       ]);
       if (cancelled) return;
       setProfiles(profileRows || []);
@@ -2043,6 +2321,9 @@ export default function App() {
       setContasReceber(contasReceberRows || []);
       setRecurringExpenses(recurringRows || []);
       setPendingEdits(pendingEditsRows || []);
+      setEmployees(employeeRows || []);
+      setPayrollEntries((payrollRows || []).map((p) => ({ ...p, salario: Number(p.salario), adiantamento: Number(p.adiantamento), vale_mercado: Number(p.vale_mercado), horas_extras: Number(p.horas_extras), ajuda_custo: Number(p.ajuda_custo), outros_proventos: Number(p.outros_proventos), descontos: Number(p.descontos) })));
+      setPayrollPayments((payrollPaymentRows || []).map((p) => ({ ...p, valor_pago: Number(p.valor_pago) })));
       setDataLoading(false);
     }
     loadAll();
@@ -2057,6 +2338,9 @@ export default function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "revenue_forecast" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "recurring_expenses" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "pending_edits" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "employees" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "payroll_entries" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "payroll_payments" }, () => loadAll())
       .subscribe();
     channelRef.current = channel;
 
@@ -2244,6 +2528,56 @@ export default function App() {
     setErrorBanner(""); return true;
   };
 
+  // ---------- RH: Funcionários ----------
+  const addEmployee = async (e) => {
+    const { error } = await supabase.from("employees").insert({ ...e, created_by: currentUser.id });
+    if (error) { setErrorBanner("Não consegui salvar o funcionário: " + error.message); return false; }
+    setErrorBanner(""); return true;
+  };
+  const editEmployee = async (original, e) => {
+    const { error } = await supabase.from("employees").update(e).eq("id", original.id);
+    if (error) { setErrorBanner("Não consegui salvar: " + error.message); return false; }
+    setErrorBanner(""); return true;
+  };
+  const toggleEmployeeStatus = async (e) => {
+    const { error } = await supabase.from("employees").update({ status: e.status === "ativo" ? "inativo" : "ativo" }).eq("id", e.id);
+    if (error) setErrorBanner("Não consegui atualizar: " + error.message);
+  };
+
+  // ---------- RH: Folha de pagamento ----------
+  const ensurePayrollEntries = async (competencia, ativos) => {
+    const jaExistem = new Set(payrollEntries.filter((p) => p.competencia === competencia).map((p) => p.funcionario_id));
+    const faltando = ativos.filter((f) => !jaExistem.has(f.id));
+    if (faltando.length === 0) return;
+    const novasLinhas = faltando.map((f) => ({
+      funcionario_id: f.id, competencia, salario: f.salario_base, adiantamento: 0, vale_mercado: 0,
+      horas_extras: 0, ajuda_custo: 0, outros_proventos: 0, descontos: 0,
+      data_prevista_pagamento: competencia, created_by: currentUser.id,
+    }));
+    const { error } = await supabase.from("payroll_entries").insert(novasLinhas);
+    if (error) setErrorBanner("Não consegui carregar a folha do mês: " + error.message);
+  };
+  const updatePayrollField = async (entry, field, value) => {
+    setPayrollEntries((prev) => prev.map((p) => (p.id === entry.id ? { ...p, [field]: value } : p))); // atualiza a tela na hora
+    const { error } = await supabase.from("payroll_entries").update({ [field]: value }).eq("id", entry.id);
+    if (error) setErrorBanner("Não consegui salvar: " + error.message);
+  };
+  const registrarPagamentoFolha = async (entry, { dataPagamento, valorPago, conta, observacao }) => {
+    const funcionario = employees.find((f) => f.id === entry.funcionario_id);
+    const { data: txRow, error: txErr } = await supabase.from("transactions").insert(toDb({
+      type: "despesa", date: dataPagamento, valor: valorPago, conta, categoria: "Salários",
+      pessoa: funcionario?.nome, descricao: `Folha ${entry.competencia.slice(0, 7)} — ${funcionario?.nome || ""}`,
+      conferido: false, createdBy: currentUser.name, createdByUid: currentUser.id,
+    })).select().single();
+    if (txErr) { setErrorBanner("Não consegui registrar o pagamento: " + txErr.message); return false; }
+    const { error } = await supabase.from("payroll_payments").insert({
+      payroll_entry_id: entry.id, data_pagamento: dataPagamento, valor_pago: valorPago,
+      conta_id: conta, observacao, transaction_id: txRow.id, created_by: currentUser.id,
+    });
+    if (error) { setErrorBanner("Pagamento lançado, mas não consegui atualizar a folha: " + error.message); return false; }
+    setErrorBanner(""); return true;
+  };
+
   const changeRole = async (u, role) => {
     const { error } = await supabase.from("profiles").update({ role }).eq("id", u.id);
     if (error) setErrorBanner("Não consegui alterar o perfil: " + error.message);
@@ -2326,6 +2660,8 @@ export default function App() {
           {tab === "contas" && <ContasView accounts={accounts} engine={engine} onAdd={addAccount} onToggleActive={toggleAccountActive} canManage={role.canManageConfig} />}
           {tab === "categorias" && <CategoriasView categories={categories} onAdd={addCategory} onToggleActive={toggleCategoryActive} onUpdateEmoji={updateCategoryEmoji} canManage={role.canManageConfig} />}
           {tab === "relatorios" && <RelatoriosView transactions={transactions} accounts={accounts} engine={engine} />}
+          {tab === "funcionarios" && <FuncionariosView employees={employees} canManage={role.canLancar} onAdd={addEmployee} onEdit={editEmployee} onToggleStatus={toggleEmployeeStatus} />}
+          {tab === "folha" && <FolhaPagamentoView employees={employees} payrollEntries={payrollEntries} payrollPayments={payrollPayments} accounts={accounts} canManage={role.canLancar} onEnsureEntries={ensurePayrollEntries} onUpdateField={updatePayrollField} onPagar={registrarPagamentoFolha} />}
           {tab === "config" && <ConfiguracoesView profiles={profiles} currentUser={currentUser} onChangeRole={changeRole} />}
 
           <p className="text-center text-xs mt-8 mb-4 fin-no-print" style={{ color: "var(--ink-soft)", opacity: 0.6 }}>Sistema Power</p>
