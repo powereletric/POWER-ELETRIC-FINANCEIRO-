@@ -62,7 +62,10 @@ function fromDb(row) {
    ============================================================ */
 function useFinanceEngine(transactions, accounts) {
   return useMemo(() => {
-    const byType = (t) => transactions.filter((x) => x.type === t);
+    // saldo "oficial" considera só o controle novo (a partir de 01/09) — jul/ago ficam de fora pra não confundir.
+    // Importante: o saldo inicial de cada conta precisa estar atualizado com o valor real de 31/08 pra bater certinho.
+    const atuais = transactions.filter((t) => (t.date || "") >= CORTE_HISTORICO);
+    const byType = (t) => atuais.filter((x) => x.type === t);
     const saldoPorConta = {};
     accounts.forEach((a) => { saldoPorConta[a.id] = a.saldoInicial || 0; });
 
@@ -801,11 +804,12 @@ function FluxoCaixaView({ transactions, accounts, categories, onToggleConferido,
   const [q, setQ] = useState("");
   const verHistorico = dataInicial !== CORTE_HISTORICO;
 
-  // saldo consolidado da empresa acumulado até cada lançamento (em ordem cronológica real,
-  // independente dos filtros aplicados na tela — assim o saldo mostrado sempre bate com a realidade)
+  // saldo acumulado do controle novo (a partir de 01/09), pra bater com o card do Dashboard.
+  // No modo histórico, calcula à parte a partir de zero — é só pra consulta, não representa saldo real de caixa.
   const saldoAcumuladoPorId = useMemo(() => {
-    const inicio = accounts.reduce((s, a) => s + (a.saldoInicial || 0), 0);
-    const chron = [...transactions].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || "").localeCompare(b.createdAt || ""));
+    const inicio = verHistorico ? 0 : accounts.reduce((s, a) => s + (a.saldoInicial || 0), 0);
+    const base = verHistorico ? transactions.filter((t) => (t.date || "") < CORTE_HISTORICO) : transactions.filter((t) => (t.date || "") >= CORTE_HISTORICO);
+    const chron = [...base].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || "").localeCompare(b.createdAt || ""));
     let acc = inicio;
     const map = {};
     chron.forEach((t) => {
@@ -818,7 +822,7 @@ function FluxoCaixaView({ transactions, accounts, categories, onToggleConferido,
       map[t.id] = acc;
     });
     return map;
-  }, [transactions, accounts]);
+  }, [transactions, accounts, verHistorico]);
 
   const sorted = [...transactions].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
   const filtered = sorted.filter((t) => {
