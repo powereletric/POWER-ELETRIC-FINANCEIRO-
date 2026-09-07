@@ -2327,6 +2327,8 @@ export default function App() {
           {tab === "categorias" && <CategoriasView categories={categories} onAdd={addCategory} onToggleActive={toggleCategoryActive} onUpdateEmoji={updateCategoryEmoji} canManage={role.canManageConfig} />}
           {tab === "relatorios" && <RelatoriosView transactions={transactions} accounts={accounts} engine={engine} />}
           {tab === "config" && <ConfiguracoesView profiles={profiles} currentUser={currentUser} onChangeRole={changeRole} />}
+
+          <p className="text-center text-xs mt-8 mb-4 fin-no-print" style={{ color: "var(--ink-soft)", opacity: 0.6 }}>Sistema Power</p>
         </div>
 
         {role.canLancar && (
