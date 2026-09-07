@@ -760,9 +760,12 @@ function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, o
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
-                {["Data", "Tipo", "Descrição", "Conta", "Categoria", "Entrada", "Saída", "Conf.", "", ""].map((h) => (
+                {["Data", "Tipo", "Descrição", "Conta", "Categoria", "Entrada", "Saída"].map((h) => (
                   <th key={h} className="text-left px-3 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
                 ))}
+                <th className="text-center px-2 py-2 font-medium text-xs whitespace-nowrap" style={{ position: "sticky", right: 76, background: "#F0ECE0", boxShadow: "-4px 0 4px -2px rgba(0,0,0,0.08)" }}>Conf.</th>
+                <th className="px-2 py-2" style={{ position: "sticky", right: 38, background: "#F0ECE0" }}></th>
+                <th className="px-2 py-2" style={{ position: "sticky", right: 0, background: "#F0ECE0" }}></th>
               </tr>
             </thead>
             <tbody>
@@ -782,15 +785,15 @@ function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, o
                     <td className="px-3 py-2 whitespace-nowrap text-xs">{t.categoria || "—"}</td>
                     <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--green)" }}>{["receita", "devolucao_adiantamento", "transferencia"].includes(t.type) ? fmtBRL(t.valor) : ""}</td>
                     <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--red)" }}>{((t.type === "despesa" && !t.pendenteReembolso) || t.type === "adiantamento" || t.type === "reembolso_pagamento") ? fmtBRL(t.valor) : ""}</td>
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 76, background: "var(--panel)", boxShadow: "-4px 0 4px -2px rgba(0,0,0,0.08)" }}>
                       <button onClick={() => onToggleConferido(t)} className="fin-focus" title="Marcar conferido">
                         {t.conferido ? <Check size={16} style={{ color: "var(--green)" }} /> : <Clock size={16} style={{ color: "var(--ink-soft)" }} />}
                       </button>
                     </td>
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 38, background: "var(--panel)" }}>
                       <button onClick={() => onEdit(t)} className="fin-focus" title="Editar"><Edit2 size={15} style={{ color: "var(--ink-soft)" }} /></button>
                     </td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 0, background: "var(--panel)" }}>
                       {canDelete && <button onClick={() => onDelete(t)} className="fin-focus" title="Excluir"><Trash2 size={15} style={{ color: "var(--red)" }} /></button>}
                     </td>
                   </tr>
