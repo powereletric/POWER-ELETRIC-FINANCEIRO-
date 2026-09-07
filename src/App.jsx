@@ -5,7 +5,7 @@ import {
   Landmark, BarChart3, Settings, Plus, X, Check, Clock, AlertCircle,
   ChevronDown, LogOut, Lock, Trash2, Edit2, HandCoins, Receipt,
   ListChecks, Eye, EyeOff, ArrowUpCircle, ArrowDownCircle, ArrowRightLeft,
-  Mail
+  Mail, CreditCard, ShieldCheck, Printer
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -20,10 +20,10 @@ import {
    ============================================================ */
 
 const ROLES = {
-  admin: { label: "Administrador", canDelete: true, canManageUsers: true, canManageConfig: true, canLancar: true, isSocio: false },
-  financeiro: { label: "Financeiro", canDelete: false, canManageUsers: false, canManageConfig: false, canLancar: true, isSocio: false },
-  lancamento: { label: "Usuário de lançamento", canDelete: false, canManageUsers: false, canManageConfig: false, canLancar: true, isSocio: false },
-  socio: { label: "Sócio", canDelete: false, canManageUsers: false, canManageConfig: false, canLancar: false, isSocio: true },
+  admin: { label: "Administrador", canDelete: true, canManageUsers: true, canManageConfig: true, canLancar: true, isSocio: false, isAdmin: true },
+  financeiro: { label: "Financeiro", canDelete: false, canManageUsers: false, canManageConfig: false, canLancar: true, isSocio: false, isAdmin: false },
+  lancamento: { label: "Usuário de lançamento", canDelete: false, canManageUsers: false, canManageConfig: false, canLancar: true, isSocio: false, isAdmin: false },
+  socio: { label: "Sócio", canDelete: false, canManageUsers: false, canManageConfig: false, canLancar: false, isSocio: true, isAdmin: false },
 };
 
 const fmtBRL = (v) => (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -42,6 +42,7 @@ function toDb(tx) {
     observacao: tx.observacao || null, documento: tx.documento || null,
     pendente_reembolso: !!tx.pendenteReembolso,
     ref_adiantamento_id: tx.refAdiantamentoId || null, ref_despesa_id: tx.refDespesaId || null,
+    ref_recurring_expense_id: tx.refRecurringExpenseId || null,
     conferido: !!tx.conferido, created_by: tx.createdByUid || null, created_by_name: tx.createdBy || null,
   };
 }
@@ -52,7 +53,7 @@ function fromDb(row) {
     categoria: row.categoria, pessoa: row.pessoa, descricao: row.descricao,
     observacao: row.observacao, documento: row.documento,
     pendenteReembolso: row.pendente_reembolso, refAdiantamentoId: row.ref_adiantamento_id,
-    refDespesaId: row.ref_despesa_id, conferido: row.conferido,
+    refDespesaId: row.ref_despesa_id, refRecurringExpenseId: row.ref_recurring_expense_id, conferido: row.conferido,
     createdBy: row.created_by_name, createdAt: row.created_at,
   };
 }
@@ -79,6 +80,22 @@ function useFinanceEngine(transactions, accounts) {
     byType("devolucao_adiantamento").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) + t.valor; });
     byType("reembolso_pagamento").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) - t.valor; });
     byType("ajuste").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) + t.valor; });
+    byType("emprestimo_terceiro").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) + t.valor; });
+    byType("pagamento_emprestimo").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) - t.valor; });
+
+    const emprestimosMap = {};
+    byType("emprestimo_terceiro").forEach((t) => {
+      const key = t.pessoa || "Não identificado";
+      if (!emprestimosMap[key]) emprestimosMap[key] = { pessoa: key, recebido: 0, pago: 0 };
+      emprestimosMap[key].recebido += t.valor;
+    });
+    byType("pagamento_emprestimo").forEach((t) => {
+      const key = t.pessoa || "Não identificado";
+      if (!emprestimosMap[key]) emprestimosMap[key] = { pessoa: key, recebido: 0, pago: 0 };
+      emprestimosMap[key].pago += t.valor;
+    });
+    const emprestimos = Object.values(emprestimosMap).map((e) => ({ ...e, saldoDevedor: e.recebido - e.pago }));
+    const totalEmprestimosDevedor = emprestimos.reduce((s, e) => s + Math.max(0, e.saldoDevedor), 0);
 
     const saldoConsolidado = Object.values(saldoPorConta).reduce((s, v) => s + v, 0);
 
@@ -96,7 +113,7 @@ function useFinanceEngine(transactions, accounts) {
     });
     const totalReembolsosPendentes = reembolsos.filter((r) => r.status !== "pago").reduce((s, r) => s + r.restante, 0);
 
-    return { saldoPorConta, saldoConsolidado, adiantamentos, totalEmPoderDeTerceiros, reembolsos, totalReembolsosPendentes };
+    return { saldoPorConta, saldoConsolidado, adiantamentos, totalEmPoderDeTerceiros, reembolsos, totalReembolsosPendentes, emprestimos, totalEmprestimosDevedor };
   }, [transactions, accounts]);
 }
 
@@ -288,6 +305,7 @@ function TransactionModal({ initialType, accounts, categories, currentUser, onCl
     despesa: { label: "Despesa", icon: ArrowDownCircle },
     transferencia: { label: "Transferência", icon: ArrowRightLeft },
     adiantamento: { label: "Adiantamento a terceiro", icon: HandCoins },
+    emprestimo_terceiro: { label: "Empréstimo recebido", icon: HandCoins },
     ajuste: { label: "Ajuste manual de saldo", icon: Edit2 },
   };
 
@@ -296,8 +314,9 @@ function TransactionModal({ initialType, accounts, categories, currentUser, onCl
     if (!v || v <= 0) { setErr("Informe um valor válido maior que zero."); return; }
     if (!date) { setErr("Informe a data."); return; }
     if (type === "transferencia" && conta === contaDestino) { setErr("A conta de origem e destino devem ser diferentes."); return; }
-    if ((type === "receita" || type === "despesa" || type === "adiantamento" || type === "ajuste") && !conta) { setErr("Selecione a conta."); return; }
+    if ((type === "receita" || type === "despesa" || type === "adiantamento" || type === "ajuste" || type === "emprestimo_terceiro") && !conta) { setErr("Selecione a conta."); return; }
     if (type === "transferencia" && (!conta || !contaDestino)) { setErr("Selecione as duas contas."); return; }
+    if (type === "emprestimo_terceiro" && !pessoa.trim()) { setErr("Informe o nome de quem emprestou."); return; }
 
     const base = {
       type, date, valor: v, descricao: descricao.trim(), observacao: observacao.trim(),
@@ -309,6 +328,7 @@ function TransactionModal({ initialType, accounts, categories, currentUser, onCl
     if (type === "despesa") tx = { ...tx, conta, categoria, pendenteReembolso };
     if (type === "transferencia") tx = { ...tx, contaOrigem: conta, contaDestino };
     if (type === "adiantamento") tx = { ...tx, conta };
+    if (type === "emprestimo_terceiro") tx = { ...tx, conta };
     if (type === "ajuste") tx = { ...tx, conta, descricao: descricao.trim() };
 
     setSaving(true);
@@ -334,8 +354,8 @@ function TransactionModal({ initialType, accounts, categories, currentUser, onCl
         <Field label="Valor (R$)" required><TextInput inputMode="decimal" placeholder="0,00" value={valor} onChange={(e) => setValor(e.target.value)} /></Field>
       </div>
 
-      {(type === "receita" || type === "despesa" || type === "adiantamento" || type === "ajuste") && (
-        <Field label="Conta" required>
+      {(type === "receita" || type === "despesa" || type === "adiantamento" || type === "ajuste" || type === "emprestimo_terceiro") && (
+        <Field label={type === "emprestimo_terceiro" ? "Conta que recebeu o empréstimo" : "Conta"} required>
           <Select value={conta} onChange={(e) => setConta(e.target.value)}>
             {activeAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </Select>
@@ -360,7 +380,7 @@ function TransactionModal({ initialType, accounts, categories, currentUser, onCl
           Foi paga por alguém do próprio bolso (gera reembolso pendente, não sai de nenhuma conta agora)
         </label>
       )}
-      <Field label={type === "adiantamento" ? "Pessoa que vai receber o adiantamento" : "Pessoa / beneficiário"}>
+      <Field label={type === "adiantamento" ? "Pessoa que vai receber o adiantamento" : type === "emprestimo_terceiro" ? "Quem emprestou o dinheiro" : "Pessoa / beneficiário"}>
         <TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} placeholder="Nome" />
       </Field>
       <Field label="Nº documento / observação">
@@ -570,6 +590,89 @@ function PagamentoReembolsoModal({ reembolso, accounts, currentUser, onClose, on
 }
 
 /* ============================================================
+   EMPRÉSTIMOS DE TERCEIROS (Conta Gilmar e afins)
+   ============================================================ */
+function PagamentoEmprestimoModal({ emprestimo, accounts, currentUser, onClose, onSave }) {
+  const [valor, setValor] = useState(String(emprestimo.saldoDevedor.toFixed(2)).replace(".", ","));
+  const [conta, setConta] = useState(accounts[0]?.id || "");
+  const [date, setDate] = useState(todayISO());
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    const v = parseFloat(String(valor).replace(",", "."));
+    if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
+    if (v > emprestimo.saldoDevedor + 0.009) { setErr("Valor maior que o saldo devedor."); return; }
+    setSaving(true);
+    const ok = await onSave({
+      type: "pagamento_emprestimo", date, valor: v, conta, pessoa: emprestimo.pessoa,
+      conferido: false, createdBy: currentUser.name, createdByUid: currentUser.id,
+    });
+    setSaving(false);
+    if (!ok) setErr("Não consegui salvar. Tente novamente.");
+  };
+  return (
+    <Modal title={`Pagar empréstimo — ${emprestimo.pessoa}`} onClose={onClose}>
+      <Card className="mb-4" style={{ background: "var(--amber-soft)", border: "none" }}>
+        <p className="text-sm">Recebido: <Money v={emprestimo.recebido} size="sm" /> · Já devolvido: <Money v={emprestimo.pago} size="sm" /></p>
+        <p className="text-sm mt-1">Saldo devedor: <Money v={emprestimo.saldoDevedor} size="sm" tone="neg" /></p>
+      </Card>
+      <Field label="Data do pagamento"><TextInput type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      <Field label="Valor a devolver agora (R$)" required><TextInput inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} /></Field>
+      <Field label="Conta pagadora"><Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Salvando..." : "Confirmar devolução"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function EmprestimosView({ engine, onPagar }) {
+  const abertos = engine.emprestimos.filter((e) => e.saldoDevedor > 0.009);
+  const quitados = engine.emprestimos.filter((e) => e.saldoDevedor <= 0.009);
+  return (
+    <div className="space-y-5">
+      <Card style={{ background: "var(--amber-soft)", border: "none" }}>
+        <p className="text-sm">Dinheiro emprestado por terceiros (não é receita) pra pagar contas da empresa — e o que ainda falta devolver.</p>
+      </Card>
+      <div>
+        <p className="font-semibold mb-2 fin-display">Em aberto</p>
+        {abertos.length === 0 ? <EmptyState text="Nenhum empréstimo em aberto." /> : (
+          <Card className="p-0 overflow-hidden">
+            {abertos.map((e, i) => (
+              <div key={e.pessoa} className="flex items-center justify-between px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
+                <div>
+                  <p className="text-sm font-medium">{e.pessoa}</p>
+                  <p className="text-xs" style={{ color: "var(--ink-soft)" }}>Recebido <Money v={e.recebido} size="sm" /> · Devolvido <Money v={e.pago} size="sm" /></p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Money v={e.saldoDevedor} size="sm" tone="neg" />
+                  <Btn variant="gold" onClick={() => onPagar(e)}>Registrar devolução</Btn>
+                </div>
+              </div>
+            ))}
+          </Card>
+        )}
+      </div>
+      {quitados.length > 0 && (
+        <div>
+          <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Quitados</p>
+          <Card className="p-0 overflow-hidden">
+            {quitados.map((e, i) => (
+              <div key={e.pessoa} className="flex items-center justify-between px-4 py-2.5 text-sm" style={{ borderTop: i ? "1px solid var(--line)" : "none", opacity: 0.7 }}>
+                <span>{e.pessoa}</span><Money v={e.recebido} size="sm" />
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    VIEW: DASHBOARD
    ============================================================ */
 const CATEGORY_EMOJI = [
@@ -626,6 +729,25 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
           ))}
         </div>
       </Card>
+
+      {(() => {
+        const em7dias = new Date(); em7dias.setDate(em7dias.getDate() + 7);
+        const limite = em7dias.toISOString().slice(0, 10);
+        const despesasVencendo = (despesasPrevistas || []).filter((d) => d.status !== "paga" && (d.data_vencimento || "") <= limite);
+        const notasVencendo = (contasReceber || []).filter((n) => n.status !== "recebido" && (n.data_prevista_recebimento || "") <= limite);
+        const total = despesasVencendo.length + notasVencendo.length;
+        if (total === 0) return null;
+        return (
+          <Card style={{ background: "var(--amber-soft)", border: "none" }} className="flex items-center gap-2">
+            <AlertCircle size={18} style={{ color: "var(--amber)" }} />
+            <p className="text-sm">
+              ⏰ <b>{total} conta{total > 1 ? "s" : ""}</b> vencendo ou já vencida{total > 1 ? "s" : ""} nos próximos 7 dias
+              {despesasVencendo.length > 0 && ` — ${despesasVencendo.length} a pagar`}
+              {notasVencendo.length > 0 && ` — ${notasVencendo.length} a receber`}
+            </p>
+          </Card>
+        );
+      })()}
 
       {!role?.isSocio && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -791,6 +913,7 @@ const TYPE_LABELS = {
   transferencia: { label: "Transferência", tone: "teal" }, adiantamento: { label: "Adiantamento", tone: "amber" },
   baixa_adiantamento: { label: "Uso de adiantamento", tone: "amber" }, devolucao_adiantamento: { label: "Devolução adiant.", tone: "teal" },
   reembolso_pagamento: { label: "Pagto. reembolso", tone: "neutral" }, ajuste: { label: "Ajuste", tone: "neutral" },
+  emprestimo_terceiro: { label: "Empréstimo recebido", tone: "amber" }, pagamento_emprestimo: { label: "Pagto. empréstimo", tone: "neutral" },
 };
 function accName(accounts, id) { return accounts.find((a) => a.id === id)?.name || "—"; }
 
@@ -1052,8 +1175,8 @@ function RelatoriosView({ transactions, accounts, engine }) {
   const data = groupBy === "categoria" ? breakdown : groupBy === "conta" ? byAccount : byPerson;
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap gap-2 items-center">
+    <div className="space-y-5" id="relatorio-print-area">
+      <div className="flex flex-wrap gap-2 items-center fin-no-print">
         <Select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ width: 160 }}>
           {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{new Date(2000, m - 1, 1).toLocaleDateString("pt-BR", { month: "long" })}</option>)}
         </Select>
@@ -1061,7 +1184,9 @@ function RelatoriosView({ transactions, accounts, engine }) {
         <Select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} style={{ width: 170 }}>
           <option value="categoria">Agrupar por categoria</option><option value="conta">Agrupar por conta</option><option value="pessoa">Agrupar por pessoa</option>
         </Select>
+        <Btn variant="ghost" icon={Printer} onClick={() => window.print()} className="ml-auto">Imprimir / exportar PDF</Btn>
       </div>
+      <p className="fin-print-only text-lg font-semibold fin-display" style={{ display: "none" }}>Relatório — {monthLabel(month, year)}</p>
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Quanto entrou</p><Money v={totals.receitas} tone="pos" /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Quanto foi gasto</p><Money v={totals.despesas} tone="neg" /></Card>
@@ -1568,6 +1693,232 @@ function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcar
 }
 
 /* ============================================================
+   VIEW: DESPESAS FIXAS / RECORRENTES
+   Salários, boletos, parcelas de empréstimo. Ao "dar baixa" no mês, cria a despesa
+   real ligada (ref_recurring_expense_id) — não duplica se já foi dada baixa no mês.
+   ============================================================ */
+function NovaDespesaFixaModal({ categories, accounts, onClose, onSave }) {
+  const [descricao, setDescricao] = useState("");
+  const [categoria, setCategoria] = useState(categories[0]?.name || "");
+  const [valor, setValor] = useState("");
+  const [diaVencimento, setDiaVencimento] = useState("5");
+  const [conta, setConta] = useState(accounts[0]?.id || "");
+  const [pessoa, setPessoa] = useState("");
+  const [tipoRecorrencia, setTipoRecorrencia] = useState("indefinida");
+  const [parcelasTotais, setParcelasTotais] = useState("12");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    const v = parseFloat(String(valor).replace(",", "."));
+    const dia = parseInt(diaVencimento, 10);
+    if (!descricao.trim()) { setErr("Informe a descrição."); return; }
+    if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
+    if (!dia || dia < 1 || dia > 31) { setErr("Informe um dia de vencimento válido (1-31)."); return; }
+    setSaving(true);
+    const parcelas = tipoRecorrencia === "parcelada" ? (parseInt(parcelasTotais, 10) || 1) : null;
+    const ok = await onSave({
+      descricao: descricao.trim(), categoria, valor: v, dia_vencimento: dia, conta_id: conta || null,
+      pessoa: pessoa.trim(), tipo_recorrencia: tipoRecorrencia,
+      parcelas_totais: parcelas, parcelas_restantes: parcelas, ativo: true,
+    });
+    setSaving(false);
+    if (!ok) setErr("Não consegui salvar. Tente novamente.");
+  };
+
+  return (
+    <Modal title="Nova despesa fixa" onClose={onClose}>
+      <Field label="Descrição" required><TextInput value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex: Salário Alex, Aluguel, Parcela empréstimo BB" /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Valor (R$)" required><TextInput inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></Field>
+        <Field label="Dia do vencimento" required><TextInput inputMode="numeric" value={diaVencimento} onChange={(e) => setDiaVencimento(e.target.value)} placeholder="Ex: 5" /></Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Categoria"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</Select></Field>
+        <Field label="Conta de pagamento"><Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+      </div>
+      <Field label="Pessoa / fornecedor"><TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} /></Field>
+      <Field label="Tipo">
+        <Select value={tipoRecorrencia} onChange={(e) => setTipoRecorrencia(e.target.value)}>
+          <option value="indefinida">Fixa (sem previsão de terminar)</option>
+          <option value="parcelada">Parcelada (tem prazo pra acabar)</option>
+        </Select>
+      </Field>
+      {tipoRecorrencia === "parcelada" && (
+        <Field label="Quantidade de parcelas" required><TextInput inputMode="numeric" value={parcelasTotais} onChange={(e) => setParcelasTotais(e.target.value)} /></Field>
+      )}
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Salvando..." : "Salvar despesa fixa"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function DespesasFixasView({ recurringExpenses, transactions, accounts, categories, canManage, onAdd, onToggleAtivo, onDarBaixa }) {
+  const [modal, setModal] = useState(null);
+  const mesAtual = todayISO().slice(0, 7);
+  const ativas = recurringExpenses.filter((r) => r.ativo);
+  const inativas = recurringExpenses.filter((r) => !r.ativo);
+  const totalMensal = ativas.reduce((s, r) => s + r.valor, 0);
+  const baixasEsteMes = new Set(transactions.filter((t) => t.refRecurringExpenseId && (t.date || "").slice(0, 7) === mesAtual).map((t) => t.refRecurringExpenseId));
+
+  return (
+    <div className="space-y-5">
+      <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total fixo por mês</p><Money v={totalMensal} tone="neg" size="lg" /></Card>
+      {canManage && <Btn variant="gold" icon={Plus} onClick={() => setModal({ kind: "nova" })}>Nova despesa fixa</Btn>}
+
+      <Card className="p-0 overflow-hidden">
+        {ativas.length === 0 ? <div className="p-4"><EmptyState text="Nenhuma despesa fixa cadastrada." /></div> : ativas.map((r, i) => {
+          const jaDeuBaixa = baixasEsteMes.has(r.id);
+          return (
+            <div key={r.id} className="flex items-center justify-between px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
+              <div>
+                <p className="text-sm font-medium">
+                  {r.descricao}
+                  {r.tipo_recorrencia === "parcelada" && <Pill tone="teal"> {(r.parcelas_totais - r.parcelas_restantes) + 1}/{r.parcelas_totais}</Pill>}
+                </p>
+                <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{r.categoria || "—"} · vence dia {r.dia_vencimento}{r.pessoa ? ` · ${r.pessoa}` : ""}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Money v={r.valor} size="sm" tone="neg" />
+                {canManage && (
+                  <>
+                    {jaDeuBaixa
+                      ? <Pill tone="green">Baixa dada este mês</Pill>
+                      : <Btn variant="gold" onClick={() => onDarBaixa(r)}>Dar baixa este mês</Btn>}
+                    <Btn variant="ghost" onClick={() => onToggleAtivo(r)}>Desativar</Btn>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+
+      {inativas.length > 0 && (
+        <div>
+          <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Inativas / quitadas</p>
+          <Card className="p-0 overflow-hidden">
+            {inativas.map((r, i) => (
+              <div key={r.id} className="flex items-center justify-between px-4 py-2.5 text-sm" style={{ borderTop: i ? "1px solid var(--line)" : "none", opacity: 0.7 }}>
+                <span>{r.descricao}</span>
+                {canManage && <Btn variant="ghost" onClick={() => onToggleAtivo(r)}>Reativar</Btn>}
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+
+      {modal?.kind === "nova" && <NovaDespesaFixaModal categories={categories.filter((c) => c.active)} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   VIEW: FATURA DO CARTÃO
+   ============================================================ */
+function CartaoView({ transactions, accounts }) {
+  const cartoes = accounts.filter((a) => a.tipo === "cartao_credito");
+  const now = new Date();
+  const [cartaoId, setCartaoId] = useState(cartoes[0]?.id || "");
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+
+  if (cartoes.length === 0) return <EmptyState text="Nenhum cartão de crédito cadastrado ainda (cadastre em Contas, com o tipo 'cartão de crédito')." />;
+
+  const periodTx = filterByPeriod(transactions, month, year).filter((t) => t.type === "despesa" && t.conta === cartaoId);
+  const total = periodTx.reduce((s, t) => s + t.valor, 0);
+  const porCategoria = categoryBreakdown(periodTx);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-2 items-center">
+        <Select value={cartaoId} onChange={(e) => setCartaoId(e.target.value)} style={{ width: 200 }}>
+          {cartoes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Select>
+        <Select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ width: 160 }}>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{new Date(2000, m - 1, 1).toLocaleDateString("pt-BR", { month: "long" })}</option>)}
+        </Select>
+        <Select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 110 }}>
+          {[year - 1, year, year + 1].map((y) => <option key={y} value={y}>{y}</option>)}
+        </Select>
+      </div>
+      <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total gasto no cartão — {monthLabel(month, year)}</p><Money v={total} tone="neg" size="lg" /></Card>
+      <Card>
+        <p className="font-semibold mb-3 fin-display">Por categoria</p>
+        {porCategoria.length === 0 ? <EmptyState text="Nenhuma compra no cartão neste período." /> : (
+          <div className="space-y-2">
+            {porCategoria.map((c) => (
+              <div key={c.name} className="flex items-center justify-between py-1.5" style={{ borderBottom: "1px solid var(--line)" }}>
+                <span className="text-sm">{c.name}</span>
+                <Money v={c.value} size="sm" tone="neg" />
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
+   VIEW: APROVAÇÕES (edições feitas por quem não é admin)
+   ============================================================ */
+function AprovacoesView({ pendingEdits, transactions, isAdmin, onApprove, onReject }) {
+  const pendentes = pendingEdits.filter((p) => p.status === "pending").sort((a, b) => (b.requested_at || "").localeCompare(a.requested_at || ""));
+  const resolvidas = pendingEdits.filter((p) => p.status !== "pending").sort((a, b) => (b.reviewed_at || "").localeCompare(a.reviewed_at || "")).slice(0, 20);
+
+  return (
+    <div className="space-y-5">
+      <Card style={{ background: "var(--teal-soft)", border: "none" }}>
+        <p className="text-sm">{isAdmin ? "Edições feitas por quem não é administrador ficam aqui esperando sua aprovação." : "Suas edições de lançamentos passam por aqui até serem aprovadas pelo administrador."}</p>
+      </Card>
+      <div>
+        <p className="font-semibold mb-2 fin-display">Pendentes</p>
+        {pendentes.length === 0 ? <EmptyState text="Nenhuma edição pendente." /> : (
+          <Card className="p-0 overflow-hidden">
+            {pendentes.map((p, i) => {
+              const tx = transactions.find((t) => t.id === p.transaction_id);
+              return (
+                <div key={p.id} className="px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
+                  <p className="text-sm font-medium">{tx?.descricao || tx?.pessoa || "Lançamento"} <Pill tone="amber">pedido por {p.requested_by_name}</Pill></p>
+                  <div className="text-xs mt-1 space-y-0.5" style={{ color: "var(--ink-soft)" }}>
+                    {Object.entries(p.changes).map(([field, c]) => (
+                      <p key={field}>{c.label}: <s>{c.old || "—"}</s> → <b>{c.new || "—"}</b></p>
+                    ))}
+                  </div>
+                  {isAdmin && (
+                    <div className="flex gap-2 mt-2">
+                      <Btn variant="gold" onClick={() => onApprove(p)}>Aprovar</Btn>
+                      <Btn variant="danger" onClick={() => onReject(p)}>Rejeitar</Btn>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </Card>
+        )}
+      </div>
+      {resolvidas.length > 0 && (
+        <div>
+          <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Últimas resolvidas</p>
+          <Card className="p-0 overflow-hidden">
+            {resolvidas.map((p, i) => (
+              <div key={p.id} className="flex items-center justify-between px-4 py-2.5 text-sm" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
+                <span>Pedido de {p.requested_by_name}</span>
+                <Pill tone={p.status === "approved" ? "green" : "red"}>{p.status === "approved" ? "Aprovada" : "Rejeitada"}</Pill>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    VIEW: CONFIGURAÇÕES
    ============================================================ */
 function ConfiguracoesView({ profiles, currentUser, onChangeRole }) {
@@ -1619,8 +1970,12 @@ const NAV = [
   { key: "fluxo", label: "Fluxo de caixa", icon: ListChecks },
   { key: "despesas-previstas", label: "Despesas Previstas", icon: TrendingDown },
   { key: "contas-receber", label: "Contas a Receber", icon: Wallet },
+  { key: "despesas-fixas", label: "Despesas Fixas", icon: Clock },
+  { key: "cartao", label: "Fatura do Cartão", icon: CreditCard },
   { key: "adiantamentos", label: "Adiantamentos", icon: HandCoins },
+  { key: "emprestimos", label: "Empréstimos", icon: PiggyBank },
   { key: "reembolsos", label: "Reembolsos", icon: Receipt },
+  { key: "aprovacoes", label: "Aprovações", icon: ShieldCheck },
   { key: "contas", label: "Contas", icon: Landmark },
   { key: "categorias", label: "Categorias", icon: BarChart3 },
   { key: "relatorios", label: "Relatórios", icon: BarChart3 },
@@ -1644,6 +1999,8 @@ export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [despesasPrevistas, setDespesasPrevistas] = useState([]);
   const [contasReceber, setContasReceber] = useState([]);
+  const [recurringExpenses, setRecurringExpenses] = useState([]);
+  const [pendingEdits, setPendingEdits] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [modal, setModal] = useState(null);
@@ -1665,13 +2022,15 @@ export default function App() {
 
     async function loadAll() {
       setDataLoading(true);
-      const [{ data: profileRows }, { data: accountRows }, { data: categoryRows }, { data: txRows }, { data: despesasPrevistasRows }, { data: contasReceberRows }] = await Promise.all([
+      const [{ data: profileRows }, { data: accountRows }, { data: categoryRows }, { data: txRows }, { data: despesasPrevistasRows }, { data: contasReceberRows }, { data: recurringRows }, { data: pendingEditsRows }] = await Promise.all([
         supabase.from("profiles").select("*").order("name"),
         supabase.from("accounts").select("*").order("created_at"),
         supabase.from("categories").select("*").order("name"),
         supabase.from("transactions").select("*").order("date", { ascending: false }),
         supabase.from("despesas_previstas").select("*").order("data_vencimento"),
         supabase.from("revenue_forecast").select("*").order("data_prevista_recebimento"),
+        supabase.from("recurring_expenses").select("*").order("dia_vencimento"),
+        supabase.from("pending_edits").select("*").order("requested_at", { ascending: false }),
       ]);
       if (cancelled) return;
       setProfiles(profileRows || []);
@@ -1682,6 +2041,8 @@ export default function App() {
       setTransactions((txRows || []).map(fromDb));
       setDespesasPrevistas(despesasPrevistasRows || []);
       setContasReceber(contasReceberRows || []);
+      setRecurringExpenses(recurringRows || []);
+      setPendingEdits(pendingEditsRows || []);
       setDataLoading(false);
     }
     loadAll();
@@ -1694,6 +2055,8 @@ export default function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "categories" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "despesas_previstas" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "revenue_forecast" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "recurring_expenses" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "pending_edits" }, () => loadAll())
       .subscribe();
     channelRef.current = channel;
 
@@ -1726,6 +2089,18 @@ export default function App() {
   const updateTransaction = async (original, updated) => {
     const changedFields = Object.keys(EDITABLE_FIELDS).filter((f) => (original[f] ?? "") !== (updated[f] ?? ""));
     if (changedFields.length === 0) { setModal(null); return true; }
+
+    if (!role.isAdmin) {
+      // não é admin: fica pendente de aprovação, o lançamento original não muda ainda
+      const changes = {};
+      changedFields.forEach((f) => { changes[f] = { old: original[f] ?? null, new: updated[f] ?? null, label: EDITABLE_FIELDS[f] }; });
+      const { error } = await supabase.from("pending_edits").insert({
+        transaction_id: original.id, requested_by: currentUser.id, requested_by_name: currentUser.name, changes,
+      });
+      if (error) { setErrorBanner("Não consegui enviar pra aprovação: " + error.message); return false; }
+      setErrorBanner(""); setModal(null); return true;
+    }
+
     const { error } = await supabase.from("transactions").update(toDb(updated)).eq("id", original.id);
     if (error) { setErrorBanner("Não consegui salvar a edição: " + error.message); return false; }
     const logRows = changedFields.map((f) => ({
@@ -1734,6 +2109,31 @@ export default function App() {
     }));
     await supabase.from("transaction_audit_log").insert(logRows);
     setErrorBanner(""); setModal(null); return true;
+  };
+  const approvePendingEdit = async (pe) => {
+    const original = transactions.find((t) => t.id === pe.transaction_id);
+    if (!original) { setErrorBanner("Lançamento não encontrado (pode ter sido excluído)."); return false; }
+    const updated = { ...original };
+    Object.entries(pe.changes).forEach(([field, c]) => { updated[field] = c.new; });
+    const { error } = await supabase.from("transactions").update(toDb(updated)).eq("id", original.id);
+    if (error) { setErrorBanner("Não consegui aplicar a edição: " + error.message); return false; }
+    const logRows = Object.entries(pe.changes).map(([field, c]) => ({
+      transaction_id: original.id, changed_by: pe.requested_by, changed_by_name: pe.requested_by_name,
+      field_name: c.label, old_value: String(c.old ?? ""), new_value: String(c.new ?? ""), action: "edit",
+    }));
+    await supabase.from("transaction_audit_log").insert(logRows);
+    const { error: err2 } = await supabase.from("pending_edits").update({
+      status: "approved", reviewed_by: currentUser.id, reviewed_by_name: currentUser.name, reviewed_at: new Date().toISOString(),
+    }).eq("id", pe.id);
+    if (err2) { setErrorBanner("Edição aplicada, mas não consegui atualizar o status: " + err2.message); return false; }
+    setErrorBanner(""); return true;
+  };
+  const rejectPendingEdit = async (pe) => {
+    const { error } = await supabase.from("pending_edits").update({
+      status: "rejected", reviewed_by: currentUser.id, reviewed_by_name: currentUser.name, reviewed_at: new Date().toISOString(),
+    }).eq("id", pe.id);
+    if (error) { setErrorBanner("Não consegui rejeitar: " + error.message); return false; }
+    setErrorBanner(""); return true;
   };
   const addAccount = async (a) => {
     const { error } = await supabase.from("accounts").insert({ name: a.name, active: a.active, saldo_inicial: a.saldoInicial });
@@ -1817,6 +2217,33 @@ export default function App() {
     setErrorBanner(""); return true;
   };
 
+  // ---------- Despesas fixas / recorrentes ----------
+  const addRecurringExpense = async (r) => {
+    const { error } = await supabase.from("recurring_expenses").insert({ ...r, created_by: currentUser.id });
+    if (error) { setErrorBanner("Não consegui salvar a despesa fixa: " + error.message); return false; }
+    setErrorBanner(""); return true;
+  };
+  const toggleRecurringExpenseAtivo = async (r) => {
+    const { error } = await supabase.from("recurring_expenses").update({ ativo: !r.ativo }).eq("id", r.id);
+    if (error) setErrorBanner("Não consegui atualizar: " + error.message);
+  };
+  const darBaixaRecorrente = async (r) => {
+    const { data: txRow, error: txErr } = await supabase.from("transactions").insert(toDb({
+      type: "despesa", date: todayISO(), valor: r.valor, conta: r.conta_id, categoria: r.categoria,
+      pessoa: r.pessoa, descricao: r.descricao, refRecurringExpenseId: r.id,
+      conferido: false, createdBy: currentUser.name, createdByUid: currentUser.id,
+    })).select().single();
+    if (txErr) { setErrorBanner("Não consegui registrar a despesa: " + txErr.message); return false; }
+    if (r.tipo_recorrencia === "parcelada") {
+      const restantes = (r.parcelas_restantes || 1) - 1;
+      const { error } = await supabase.from("recurring_expenses").update({
+        parcelas_restantes: restantes, ativo: restantes > 0,
+      }).eq("id", r.id);
+      if (error) setErrorBanner("Despesa registrada, mas não consegui atualizar as parcelas: " + error.message);
+    }
+    setErrorBanner(""); return true;
+  };
+
   const changeRole = async (u, role) => {
     const { error } = await supabase.from("profiles").update({ role }).eq("id", u.id);
     if (error) setErrorBanner("Não consegui alterar o perfil: " + error.message);
@@ -1890,6 +2317,10 @@ export default function App() {
           {tab === "fluxo" && <FluxoCaixaView transactions={transactions} accounts={accounts} categories={categories} onToggleConferido={toggleConferido} onDelete={deleteTransaction} onEdit={(t) => setModal({ kind: "edit-tx", tx: t })} canDelete={role.canDelete} />}
           {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} />}
           {tab === "reembolsos" && <ReembolsosView engine={engine} onPagar={(r) => setModal({ kind: "reembolso", reembolso: r })} />}
+          {tab === "emprestimos" && <EmprestimosView engine={engine} onPagar={(e) => setModal({ kind: "pagar-emprestimo", emprestimo: e })} />}
+          {tab === "despesas-fixas" && <DespesasFixasView recurringExpenses={recurringExpenses} transactions={transactions} accounts={accounts} categories={categories} canManage={role.canLancar} onAdd={addRecurringExpense} onToggleAtivo={toggleRecurringExpenseAtivo} onDarBaixa={darBaixaRecorrente} />}
+          {tab === "cartao" && <CartaoView transactions={transactions} accounts={accounts} />}
+          {tab === "aprovacoes" && <AprovacoesView pendingEdits={pendingEdits} transactions={transactions} isAdmin={role.isAdmin} onApprove={approvePendingEdit} onReject={rejectPendingEdit} />}
           {tab === "despesas-previstas" && <DespesasPrevistasView despesasPrevistas={despesasPrevistas} accounts={accounts} categories={categories} canManage={role.canLancar} onAdd={addDespesaPrevista} onMarcarPaga={marcarDespesaComoPaga} />}
           {tab === "contas-receber" && <ContasReceberView contasReceber={contasReceber} accounts={accounts} canManage={role.canLancar} onAdd={addContaReceber} onMarcarRecebido={marcarContaComoRecebida} onLiberarBloqueio={liberarBloqueio} />}
           {tab === "contas" && <ContasView accounts={accounts} engine={engine} onAdd={addAccount} onToggleActive={toggleAccountActive} canManage={role.canManageConfig} />}
@@ -1910,6 +2341,7 @@ export default function App() {
       {modal?.kind === "baixa" && <BaixaAdiantamentoModal adiantamento={modal.adiantamento} categories={categories.filter((c) => c.active)} accounts={accounts.filter((a) => a.active)} currentUser={currentUser} onClose={() => setModal(null)} onSave={addTransaction} />}
       {modal?.kind === "devolucao" && <DevolucaoAdiantamentoModal adiantamento={modal.adiantamento} accounts={accounts.filter((a) => a.active)} currentUser={currentUser} onClose={() => setModal(null)} onSave={addTransaction} />}
       {modal?.kind === "reembolso" && <PagamentoReembolsoModal reembolso={modal.reembolso} accounts={accounts.filter((a) => a.active)} currentUser={currentUser} onClose={() => setModal(null)} onSave={addTransaction} />}
+      {modal?.kind === "pagar-emprestimo" && <PagamentoEmprestimoModal emprestimo={modal.emprestimo} accounts={accounts.filter((a) => a.active)} currentUser={currentUser} onClose={() => setModal(null)} onSave={addTransaction} />}
     </div>
   );
 }
