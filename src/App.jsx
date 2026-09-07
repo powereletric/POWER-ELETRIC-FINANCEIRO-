@@ -5,7 +5,7 @@ import {
   Landmark, BarChart3, Settings, Plus, X, Check, Clock, AlertCircle,
   ChevronDown, LogOut, Lock, Trash2, Edit2, HandCoins, Receipt,
   ListChecks, Eye, EyeOff, ArrowUpCircle, ArrowDownCircle, ArrowRightLeft,
-  Mail, CreditCard, ShieldCheck, Printer, Banknote
+  Mail, CreditCard, ShieldCheck, Printer, Banknote, FileCheck2, Handshake, LayoutDashboard, Timer
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -2187,6 +2187,488 @@ function FolhaPagamentoView({ employees, payrollEntries, payrollPayments, accoun
 }
 
 /* ============================================================
+   RH — HORAS EXTRAS
+   Valor calculado alimenta automaticamente a folha (payroll_entries.horas_extras)
+   do funcionário na competência correspondente, somando todos os registros do mês.
+   ============================================================ */
+function firstOfMonth(dateStr) { return (dateStr || "").slice(0, 7) + "-01"; }
+
+function NovaHoraExtraModal({ employees, onClose, onSave }) {
+  const [funcionarioId, setFuncionarioId] = useState(employees[0]?.id || "");
+  const [data, setData] = useState(todayISO());
+  const [quantidadeHoras, setQuantidadeHoras] = useState("");
+  const [percentual, setPercentual] = useState("50");
+  const [motivo, setMotivo] = useState("");
+  const [local, setLocal] = useState("");
+  const [autorizadoPor, setAutorizadoPor] = useState("");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const funcionario = employees.find((f) => f.id === funcionarioId);
+  const horas = parseFloat(String(quantidadeHoras).replace(",", ".")) || 0;
+  const perc = parseFloat(String(percentual).replace(",", ".")) || 0;
+  const valorHoraNormal = funcionario ? funcionario.salario_base / 220 : 0;
+  const valorCalculado = valorHoraNormal * (1 + perc / 100) * horas;
+
+  const submit = async () => {
+    if (!funcionarioId) { setErr("Selecione o funcionário."); return; }
+    if (!horas || horas <= 0) { setErr("Informe a quantidade de horas."); return; }
+    setSaving(true);
+    const ok = await onSave({
+      funcionario_id: funcionarioId, data, quantidade_horas: horas, percentual: perc,
+      valor_calculado: valorCalculado, motivo: motivo.trim(), local: local.trim(),
+      autorizado_por: autorizadoPor.trim(), competencia: firstOfMonth(data),
+    });
+    setSaving(false);
+    if (!ok) setErr("Não consegui salvar. Tente novamente.");
+  };
+
+  return (
+    <Modal title="Registrar hora extra" onClose={onClose}>
+      <Field label="Funcionário" required><Select value={funcionarioId} onChange={(e) => setFuncionarioId(e.target.value)}>{employees.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}</Select></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Data" required><TextInput type="date" value={data} onChange={(e) => setData(e.target.value)} /></Field>
+        <Field label="Quantidade de horas" required><TextInput inputMode="decimal" value={quantidadeHoras} onChange={(e) => setQuantidadeHoras(e.target.value)} placeholder="Ex: 2" /></Field>
+      </div>
+      <Field label="Percentual da hora extra (%)"><TextInput inputMode="decimal" value={percentual} onChange={(e) => setPercentual(e.target.value)} placeholder="50 ou 100" /></Field>
+      <Card className="mb-3" style={{ background: "var(--teal-soft)", border: "none" }}>
+        <p className="text-sm">Valor calculado (baseado no salário-base ÷ 220h): <Money v={valorCalculado} size="sm" /></p>
+      </Card>
+      <Field label="Motivo/atividade"><TextInput value={motivo} onChange={(e) => setMotivo(e.target.value)} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Local/unidade"><TextInput value={local} onChange={(e) => setLocal(e.target.value)} /></Field>
+        <Field label="Quem autorizou"><TextInput value={autorizadoPor} onChange={(e) => setAutorizadoPor(e.target.value)} /></Field>
+      </div>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Salvando..." : "Salvar"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function HorasExtrasView({ overtimeEntries, employees, canManage, onAdd }) {
+  const [modal, setModal] = useState(null);
+  const ordenadas = [...overtimeEntries].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+  const totalHoras = overtimeEntries.reduce((s, o) => s + o.quantidade_horas, 0);
+  const totalValor = overtimeEntries.reduce((s, o) => s + o.valor_calculado, 0);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3">
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total de horas extras</p><p className="fin-mono text-xl font-semibold">{totalHoras.toFixed(1)}h</p></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Valor total</p><Money v={totalValor} tone="neg" size="lg" /></Card>
+      </div>
+      {canManage && <Btn variant="gold" icon={Plus} onClick={() => setModal({ kind: "nova" })}>Registrar hora extra</Btn>}
+      <Card className="p-0 overflow-hidden">
+        {ordenadas.length === 0 ? <div className="p-4"><EmptyState text="Nenhuma hora extra registrada." /></div> : ordenadas.map((o, i) => {
+          const f = employees.find((e) => e.id === o.funcionario_id);
+          return (
+            <div key={o.id} className="flex items-center justify-between px-4 py-2.5" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
+              <div>
+                <p className="text-sm font-medium">{f?.nome || "—"}</p>
+                <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{fmtDate(o.data)} · {o.quantidade_horas}h a {o.percentual}% {o.motivo ? `· ${o.motivo}` : ""}</p>
+              </div>
+              <Money v={o.valor_calculado} size="sm" tone="neg" />
+            </div>
+          );
+        })}
+      </Card>
+      {modal?.kind === "nova" && <NovaHoraExtraModal employees={employees.filter((e) => e.status === "ativo")} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   RH — DOCUMENTOS / ASO / NRs
+   ============================================================ */
+function docStatus(dataVencimento) {
+  if (!dataVencimento) return { label: "Sem vencimento", tone: "neutral", dias: null };
+  const dias = Math.ceil((new Date(dataVencimento + "T00:00:00") - new Date(todayISO() + "T00:00:00")) / 86400000);
+  if (dias < 0) return { label: `Vencido há ${Math.abs(dias)} dias`, tone: "red", emoji: "🔴", dias };
+  if (dias <= 7) return { label: `Vence em ${dias} dias`, tone: "amber", emoji: "🟠", dias };
+  if (dias <= 30) return { label: `Vence em ${dias} dias`, tone: "amber", emoji: "🟡", dias };
+  if (dias <= 60) return { label: `Vence em ${dias} dias`, tone: "amber", emoji: "🟡", dias };
+  return { label: "Em dia", tone: "green", emoji: "🟢", dias };
+}
+const ASO_SUBTIPOS = ["Admissional", "Periódico", "Retorno ao trabalho", "Mudança de função", "Demissional"];
+
+function NovoTipoDocumentoModal({ onClose, onSave }) {
+  const [nome, setNome] = useState("");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    if (!nome.trim()) { setErr("Informe o nome."); return; }
+    setSaving(true);
+    const ok = await onSave(nome.trim());
+    setSaving(false);
+    if (!ok) setErr("Não consegui salvar (talvez já exista esse tipo).");
+  };
+  return (
+    <Modal title="Novo tipo de documento/NR" onClose={onClose}>
+      <Field label="Nome" required><TextInput value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex: NR-12, Certificado X" /></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Salvando..." : "Salvar"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function NovoDocumentoModal({ employees, tipos, onClose, onSave }) {
+  const [funcionarioId, setFuncionarioId] = useState(employees[0]?.id || "");
+  const [tipoDocumento, setTipoDocumento] = useState(tipos[0]?.nome || "");
+  const [subtipoAso, setSubtipoAso] = useState(ASO_SUBTIPOS[0]);
+  const [dataRealizacao, setDataRealizacao] = useState(todayISO());
+  const [dataValidade, setDataValidade] = useState("");
+  const [dataVencimento, setDataVencimento] = useState("");
+  const [unidade, setUnidade] = useState("");
+  const [observacoes, setObservacoes] = useState("");
+  const [anexoUrl, setAnexoUrl] = useState("");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!funcionarioId) { setErr("Selecione o funcionário."); return; }
+    if (!tipoDocumento) { setErr("Selecione o tipo."); return; }
+    setSaving(true);
+    const ok = await onSave({
+      funcionario_id: funcionarioId, tipo_documento: tipoDocumento,
+      subtipo_aso: tipoDocumento === "ASO" ? subtipoAso : null,
+      data_realizacao: dataRealizacao || null, data_validade: dataValidade || null,
+      data_vencimento: dataVencimento || null, unidade: unidade.trim(),
+      observacoes: observacoes.trim(), anexo_url: anexoUrl.trim() || null,
+    });
+    setSaving(false);
+    if (!ok) setErr("Não consegui salvar. Tente novamente.");
+  };
+
+  return (
+    <Modal title="Novo documento/NR" onClose={onClose}>
+      <Field label="Funcionário" required><Select value={funcionarioId} onChange={(e) => setFuncionarioId(e.target.value)}>{employees.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}</Select></Field>
+      <Field label="Tipo de documento/NR" required><Select value={tipoDocumento} onChange={(e) => setTipoDocumento(e.target.value)}>{tipos.map((t) => <option key={t.id} value={t.nome}>{t.nome}</option>)}</Select></Field>
+      {tipoDocumento === "ASO" && (
+        <Field label="Tipo de ASO"><Select value={subtipoAso} onChange={(e) => setSubtipoAso(e.target.value)}>{ASO_SUBTIPOS.map((s) => <option key={s} value={s}>{s}</option>)}</Select></Field>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Data de realização"><TextInput type="date" value={dataRealizacao} onChange={(e) => setDataRealizacao(e.target.value)} /></Field>
+        <Field label="Data de validade"><TextInput type="date" value={dataValidade} onChange={(e) => setDataValidade(e.target.value)} /></Field>
+      </div>
+      <Field label="Data de vencimento" required><TextInput type="date" value={dataVencimento} onChange={(e) => setDataVencimento(e.target.value)} /></Field>
+      <Field label="Unidade/local"><TextInput value={unidade} onChange={(e) => setUnidade(e.target.value)} /></Field>
+      <Field label="Link do anexo (opcional)"><TextInput value={anexoUrl} onChange={(e) => setAnexoUrl(e.target.value)} placeholder="Cole aqui o link do documento, se tiver" /></Field>
+      <Field label="Observações"><TextInput value={observacoes} onChange={(e) => setObservacoes(e.target.value)} /></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Salvando..." : "Salvar"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function DocumentosView({ documentos, tipos, employees, canManage, onAdd, onAddTipo }) {
+  const [modal, setModal] = useState(null);
+  const comStatus = documentos.map((d) => ({ ...d, statusCalc: docStatus(d.data_vencimento) }));
+  const ordenados = [...comStatus].sort((a, b) => (a.statusCalc.dias ?? 999999) - (b.statusCalc.dias ?? 999999));
+  const vencidos = comStatus.filter((d) => d.statusCalc.dias !== null && d.statusCalc.dias < 0).length;
+  const em7 = comStatus.filter((d) => d.statusCalc.dias !== null && d.statusCalc.dias >= 0 && d.statusCalc.dias <= 7).length;
+  const em30 = comStatus.filter((d) => d.statusCalc.dias !== null && d.statusCalc.dias > 7 && d.statusCalc.dias <= 30).length;
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-3 gap-3">
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🔴 Vencidos</p><p className="fin-mono text-xl font-semibold" style={{ color: "var(--red)" }}>{vencidos}</p></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🟠 Em até 7 dias</p><p className="fin-mono text-xl font-semibold" style={{ color: "var(--amber)" }}>{em7}</p></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🟡 Em até 30 dias</p><p className="fin-mono text-xl font-semibold" style={{ color: "var(--amber)" }}>{em30}</p></Card>
+      </div>
+      {canManage && (
+        <div className="flex gap-2">
+          <Btn variant="gold" icon={Plus} onClick={() => setModal({ kind: "novo" })}>Novo documento</Btn>
+          <Btn variant="ghost" icon={Plus} onClick={() => setModal({ kind: "novo-tipo" })}>Adicionar documento/NR</Btn>
+        </div>
+      )}
+      <Card className="p-0 overflow-hidden">
+        {ordenados.length === 0 ? <div className="p-4"><EmptyState text="Nenhum documento cadastrado." /></div> : ordenados.map((d, i) => {
+          const f = employees.find((e) => e.id === d.funcionario_id);
+          return (
+            <div key={d.id} className="flex items-center justify-between px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
+              <div>
+                <p className="text-sm font-medium">{f?.nome || "—"} — {d.tipo_documento}{d.subtipo_aso ? ` (${d.subtipo_aso})` : ""}</p>
+                <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{d.unidade ? `${d.unidade} · ` : ""}vencimento {fmtDate(d.data_vencimento)}</p>
+              </div>
+              <Pill tone={d.statusCalc.tone}>{d.statusCalc.emoji} {d.statusCalc.label}</Pill>
+            </div>
+          );
+        })}
+      </Card>
+      {modal?.kind === "novo" && <NovoDocumentoModal employees={employees.filter((e) => e.status === "ativo")} tipos={tipos.filter((t) => t.ativo)} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "novo-tipo" && <NovoTipoDocumentoModal onClose={() => setModal(null)} onSave={async (n) => { const ok = await onAddTipo(n); if (ok) setModal(null); return ok; }} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   RH — ACORDOS
+   ============================================================ */
+function parcelaStatus(p) {
+  if (p.status === "paga") return { label: "Paga", tone: "green" };
+  if (p.valor_pago > 0.009) return { label: "Parcial", tone: "teal" };
+  if ((p.vencimento || "") < todayISO()) return { label: "Atrasada", tone: "red" };
+  return { label: "Prevista", tone: "amber" };
+}
+
+function NovoAcordoModal({ employees, onClose, onSave }) {
+  const [funcionarioId, setFuncionarioId] = useState(employees[0]?.id || "");
+  const [tipoAcordo, setTipoAcordo] = useState("");
+  const [motivo, setMotivo] = useState("");
+  const [dataAcordo, setDataAcordo] = useState(todayISO());
+  const [valorTotal, setValorTotal] = useState("");
+  const [qtdParcelas, setQtdParcelas] = useState("1");
+  const [primeiroVencimento, setPrimeiroVencimento] = useState(todayISO());
+  const [formaPagamento, setFormaPagamento] = useState("");
+  const [observacoes, setObservacoes] = useState("");
+  const [anexoUrl, setAnexoUrl] = useState("");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const total = parseFloat(String(valorTotal).replace(",", ".")) || 0;
+  const qtd = parseInt(qtdParcelas, 10) || 1;
+  const valorParcela = qtd > 0 ? total / qtd : 0;
+
+  const submit = async () => {
+    if (!funcionarioId) { setErr("Selecione o funcionário."); return; }
+    if (!total || total <= 0) { setErr("Informe o valor total."); return; }
+    if (!qtd || qtd <= 0) { setErr("Informe a quantidade de parcelas."); return; }
+    setSaving(true);
+    const ok = await onSave({
+      funcionario_id: funcionarioId, tipo_acordo: tipoAcordo.trim(), motivo: motivo.trim(),
+      data_acordo: dataAcordo, valor_total: total, qtd_parcelas: qtd, valor_parcela: valorParcela,
+      primeiro_vencimento: primeiroVencimento, forma_pagamento: formaPagamento.trim(),
+      observacoes: observacoes.trim(), anexo_url: anexoUrl.trim() || null,
+    });
+    setSaving(false);
+    if (!ok) setErr("Não consegui salvar. Tente novamente.");
+  };
+
+  return (
+    <Modal title="Novo acordo" onClose={onClose} wide>
+      <Field label="Funcionário" required><Select value={funcionarioId} onChange={(e) => setFuncionarioId(e.target.value)}>{employees.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}</Select></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Tipo de acordo"><TextInput value={tipoAcordo} onChange={(e) => setTipoAcordo(e.target.value)} /></Field>
+        <Field label="Data do acordo"><TextInput type="date" value={dataAcordo} onChange={(e) => setDataAcordo(e.target.value)} /></Field>
+      </div>
+      <Field label="Motivo/descrição"><TextInput value={motivo} onChange={(e) => setMotivo(e.target.value)} /></Field>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Valor total (R$)" required><TextInput inputMode="decimal" value={valorTotal} onChange={(e) => setValorTotal(e.target.value)} placeholder="0,00" /></Field>
+        <Field label="Qtd. parcelas" required><TextInput inputMode="numeric" value={qtdParcelas} onChange={(e) => setQtdParcelas(e.target.value)} /></Field>
+        <Field label="Primeiro vencimento" required><TextInput type="date" value={primeiroVencimento} onChange={(e) => setPrimeiroVencimento(e.target.value)} /></Field>
+      </div>
+      <Card className="mb-3" style={{ background: "var(--teal-soft)", border: "none" }}>
+        <p className="text-sm">{qtd}x de <Money v={valorParcela} size="sm" /> — as parcelas são geradas automaticamente ao salvar</p>
+      </Card>
+      <Field label="Forma de pagamento"><TextInput value={formaPagamento} onChange={(e) => setFormaPagamento(e.target.value)} placeholder="Ex: Desconto em folha, transferência..." /></Field>
+      <Field label="Link do anexo (opcional)"><TextInput value={anexoUrl} onChange={(e) => setAnexoUrl(e.target.value)} /></Field>
+      <Field label="Observações"><TextInput value={observacoes} onChange={(e) => setObservacoes(e.target.value)} /></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Salvando..." : "Salvar acordo"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function RegistrarPagamentoParcelaModal({ parcela, acordo, funcionario, accounts, onClose, onSave }) {
+  const pendente = parcela.valor - parcela.valor_pago;
+  const [dataPagamento, setDataPagamento] = useState(todayISO());
+  const [valorPago, setValorPago] = useState(String(pendente.toFixed(2)).replace(".", ","));
+  const [conta, setConta] = useState(accounts[0]?.id || "");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    const v = parseFloat(String(valorPago).replace(",", "."));
+    if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
+    if (!conta) { setErr("Selecione a conta."); return; }
+    setSaving(true);
+    const ok = await onSave(parcela, acordo, { dataPagamento, valorPago: v, conta });
+    setSaving(false);
+    if (!ok) setErr("Não consegui registrar. Tente novamente.");
+  };
+
+  return (
+    <Modal title={`Pagar parcela ${parcela.numero_parcela}/${acordo.qtd_parcelas} — ${funcionario?.nome}`} onClose={onClose}>
+      <Card className="mb-4" style={{ background: "var(--amber-soft)", border: "none" }}>
+        <p className="text-sm">Parcela: <Money v={parcela.valor} size="sm" /> · Já pago: <Money v={parcela.valor_pago} size="sm" /> · Pendente: <Money v={pendente} size="sm" tone="neg" /></p>
+      </Card>
+      <Field label="Data do pagamento" required><TextInput type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} /></Field>
+      <Field label="Valor pago (R$)" required><TextInput inputMode="decimal" value={valorPago} onChange={(e) => setValorPago(e.target.value)} /></Field>
+      <Field label="Conta" required><Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Registrando..." : "Confirmar pagamento"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function AcordoCard({ acordo, parcelas, funcionario, accounts, canManage, onPagar }) {
+  const [open, setOpen] = useState(false);
+  const pago = parcelas.reduce((s, p) => s + p.valor_pago, 0);
+  return (
+    <Card>
+      <button className="fin-btn fin-focus w-full flex items-center justify-between text-left" onClick={() => setOpen((o) => !o)}>
+        <div>
+          <p className="text-sm font-medium">{funcionario?.nome} {acordo.tipo_acordo ? `— ${acordo.tipo_acordo}` : ""} <Pill tone={acordo.status === "quitado" ? "green" : acordo.status === "cancelado" ? "neutral" : "amber"}>{acordo.status}</Pill></p>
+          <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{acordo.motivo} · {fmtDate(acordo.data_acordo)}</p>
+        </div>
+        <div className="text-right">
+          <Money v={acordo.valor_total} size="sm" />
+          <p className="text-xs" style={{ color: "var(--ink-soft)" }}>pago <Money v={pago} size="sm" /></p>
+        </div>
+      </button>
+      {open && (
+        <div className="mt-3 pt-3 space-y-2" style={{ borderTop: "1px solid var(--line)" }}>
+          {parcelas.sort((a, b) => a.numero_parcela - b.numero_parcela).map((p) => {
+            const meta = parcelaStatus(p);
+            return (
+              <div key={p.id} className="flex items-center justify-between text-sm">
+                <span>{p.numero_parcela}/{acordo.qtd_parcelas} — vence {fmtDate(p.vencimento)} <Pill tone={meta.tone}>{meta.label}</Pill></span>
+                <div className="flex items-center gap-2">
+                  <Money v={p.valor} size="sm" />
+                  {canManage && p.status !== "paga" && <Btn variant="gold" onClick={() => onPagar(p, acordo)}>Pagar</Btn>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AcordosView({ agreements, installments, employees, accounts, canManage, onAdd, onPagar }) {
+  const [modal, setModal] = useState(null);
+  const ativos = agreements.filter((a) => a.status === "ativo" || a.status === "atrasado");
+  const outros = agreements.filter((a) => a.status === "quitado" || a.status === "cancelado");
+  const valorTotal = ativos.reduce((s, a) => s + a.valor_total, 0);
+  const pendente = ativos.reduce((s, a) => {
+    const parc = installments.filter((p) => p.acordo_id === a.id);
+    return s + parc.reduce((s2, p) => s2 + (p.valor - p.valor_pago), 0);
+  }, 0);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Acordos ativos</p><p className="fin-mono text-xl font-semibold">{ativos.length}</p></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Valor total</p><Money v={valorTotal} /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Pendente</p><Money v={pendente} tone="neg" /></Card>
+      </div>
+      {canManage && <Btn variant="gold" icon={Plus} onClick={() => setModal({ kind: "novo" })}>Novo acordo</Btn>}
+      <div className="space-y-3">
+        {ativos.length === 0 ? <EmptyState text="Nenhum acordo ativo." /> : ativos.map((a) => (
+          <AcordoCard key={a.id} acordo={a} parcelas={installments.filter((p) => p.acordo_id === a.id)} funcionario={employees.find((e) => e.id === a.funcionario_id)} accounts={accounts} canManage={canManage} onPagar={(p, ac) => setModal({ kind: "pagar", parcela: p, acordo: ac })} />
+        ))}
+      </div>
+      {outros.length > 0 && (
+        <div>
+          <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Quitados / cancelados</p>
+          <div className="space-y-3">
+            {outros.map((a) => (
+              <AcordoCard key={a.id} acordo={a} parcelas={installments.filter((p) => p.acordo_id === a.id)} funcionario={employees.find((e) => e.id === a.funcionario_id)} accounts={accounts} canManage={false} onPagar={() => {}} />
+            ))}
+          </div>
+        </div>
+      )}
+      {modal?.kind === "novo" && <NovoAcordoModal employees={employees.filter((e) => e.status === "ativo")} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "pagar" && <RegistrarPagamentoParcelaModal parcela={modal.parcela} acordo={modal.acordo} funcionario={employees.find((e) => e.id === modal.acordo.funcionario_id)} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (p, a, dados) => { const ok = await onPagar(p, a, dados); if (ok) setModal(null); return ok; }} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   RH — DASHBOARD
+   ============================================================ */
+function RHDashboardView({ employees, payrollEntries, payrollPayments, overtimeEntries, documentos, agreements, installments }) {
+  const now = new Date();
+  const competencia = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const ativos = employees.filter((e) => e.status === "ativo").length;
+  const inativos = employees.filter((e) => e.status === "inativo").length;
+
+  const folhaMes = payrollEntries.filter((p) => p.competencia === competencia);
+  const folhaTotais = folhaMes.reduce((acc, e) => {
+    const pago = payrollPayments.filter((p) => p.payroll_entry_id === e.id).reduce((s, p) => s + p.valor_pago, 0);
+    const total = payrollTotal(e);
+    acc.total += total; acc.pago += pago;
+    if (payrollStatus(e, pago) === "atrasado") acc.atrasadas += 1;
+    return acc;
+  }, { total: 0, pago: 0, atrasadas: 0 });
+
+  const horasMes = overtimeEntries.filter((o) => o.competencia === competencia);
+  const horasTotais = { qtd: horasMes.reduce((s, o) => s + o.quantidade_horas, 0), valor: horasMes.reduce((s, o) => s + o.valor_calculado, 0) };
+
+  const docsComStatus = documentos.map((d) => docStatus(d.data_vencimento));
+  const docsVencidos = docsComStatus.filter((d) => d.dias !== null && d.dias < 0).length;
+  const docsEm7 = docsComStatus.filter((d) => d.dias !== null && d.dias >= 0 && d.dias <= 7).length;
+  const docsEm30 = docsComStatus.filter((d) => d.dias !== null && d.dias > 7 && d.dias <= 30).length;
+  const docsEm60 = docsComStatus.filter((d) => d.dias !== null && d.dias > 30 && d.dias <= 60).length;
+
+  const acordosAtivos = agreements.filter((a) => a.status === "ativo" || a.status === "atrasado");
+  const acordosPago = acordosAtivos.reduce((s, a) => s + installments.filter((p) => p.acordo_id === a.id).reduce((s2, p) => s2 + p.valor_pago, 0), 0);
+  const acordosPendente = acordosAtivos.reduce((s, a) => s + installments.filter((p) => p.acordo_id === a.id).reduce((s2, p) => s2 + (p.valor - p.valor_pago), 0), 0);
+  const parcelasAtrasadas = installments.filter((p) => p.status !== "paga" && (p.vencimento || "") < todayISO()).length;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="font-semibold mb-2 fin-display">👥 Funcionários</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Ativos</p><p className="fin-mono text-xl font-semibold">{ativos}</p></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Inativos</p><p className="fin-mono text-xl font-semibold">{inativos}</p></Card>
+        </div>
+      </div>
+      <div>
+        <p className="font-semibold mb-2 fin-display">💵 Folha — {monthLabel(now.getMonth() + 1, now.getFullYear())}</p>
+        <div className="grid grid-cols-3 gap-3">
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total previsto</p><Money v={folhaTotais.total} size="sm" /></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Pago</p><Money v={folhaTotais.pago} size="sm" tone="pos" /></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Atrasadas</p><p className="fin-mono text-lg font-semibold" style={{ color: folhaTotais.atrasadas > 0 ? "var(--red)" : "var(--ink)" }}>{folhaTotais.atrasadas}</p></Card>
+        </div>
+      </div>
+      <div>
+        <p className="font-semibold mb-2 fin-display">⏱️ Horas extras — este mês</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total de horas</p><p className="fin-mono text-lg font-semibold">{horasTotais.qtd.toFixed(1)}h</p></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Valor total</p><Money v={horasTotais.valor} size="sm" /></Card>
+        </div>
+      </div>
+      <div>
+        <p className="font-semibold mb-2 fin-display">📄 Documentos</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🔴 Vencidos</p><p className="fin-mono text-lg font-semibold">{docsVencidos}</p></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🟠 7 dias</p><p className="fin-mono text-lg font-semibold">{docsEm7}</p></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🟡 30 dias</p><p className="fin-mono text-lg font-semibold">{docsEm30}</p></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🟡 60 dias</p><p className="fin-mono text-lg font-semibold">{docsEm60}</p></Card>
+        </div>
+      </div>
+      <div>
+        <p className="font-semibold mb-2 fin-display">🤝 Acordos</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Ativos</p><p className="fin-mono text-lg font-semibold">{acordosAtivos.length}</p></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Pago</p><Money v={acordosPago} size="sm" tone="pos" /></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Pendente</p><Money v={acordosPendente} size="sm" tone="neg" /></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Parcelas atrasadas</p><p className="fin-mono text-lg font-semibold" style={{ color: parcelasAtrasadas > 0 ? "var(--red)" : "var(--ink)" }}>{parcelasAtrasadas}</p></Card>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    VIEW: CONFIGURAÇÕES
    ============================================================ */
 function ConfiguracoesView({ profiles, currentUser, onChangeRole }) {
@@ -2249,6 +2731,10 @@ const NAV = [
   { key: "relatorios", label: "Relatórios", icon: BarChart3 },
   { key: "funcionarios", label: "Funcionários", icon: Users },
   { key: "folha", label: "Folha de Pagamento", icon: Banknote },
+  { key: "horas-extras", label: "Horas Extras", icon: Timer },
+  { key: "documentos-rh", label: "Documentos/NRs", icon: FileCheck2 },
+  { key: "acordos", label: "Acordos", icon: Handshake },
+  { key: "dashboard-rh", label: "Dashboard RH", icon: LayoutDashboard },
   { key: "config", label: "Configurações", icon: Settings },
 ];
 // Sócios (Elisângela, Gilmar) veem uma navegação simplificada — só visão gerencial, sem telas operacionais
@@ -2258,6 +2744,8 @@ const NAV_SOCIO = [
   { key: "contas-receber", label: "Contas a Receber", icon: Wallet },
   { key: "funcionarios", label: "Funcionários", icon: Users },
   { key: "folha", label: "Folha de Pagamento", icon: Banknote },
+  { key: "acordos", label: "Acordos", icon: Handshake },
+  { key: "dashboard-rh", label: "Dashboard RH", icon: LayoutDashboard },
   { key: "relatorios", label: "Relatórios", icon: BarChart3 },
   { key: "contas", label: "Contas", icon: Landmark },
 ];
@@ -2275,6 +2763,11 @@ export default function App() {
   const [employees, setEmployees] = useState([]);
   const [payrollEntries, setPayrollEntries] = useState([]);
   const [payrollPayments, setPayrollPayments] = useState([]);
+  const [overtimeEntries, setOvertimeEntries] = useState([]);
+  const [hrDocumentTypes, setHrDocumentTypes] = useState([]);
+  const [hrDocuments, setHrDocuments] = useState([]);
+  const [agreements, setAgreements] = useState([]);
+  const [agreementInstallments, setAgreementInstallments] = useState([]);
   const [pendingEdits, setPendingEdits] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
@@ -2297,7 +2790,7 @@ export default function App() {
 
     async function loadAll() {
       setDataLoading(true);
-      const [{ data: profileRows }, { data: accountRows }, { data: categoryRows }, { data: txRows }, { data: despesasPrevistasRows }, { data: contasReceberRows }, { data: recurringRows }, { data: pendingEditsRows }, { data: employeeRows }, { data: payrollRows }, { data: payrollPaymentRows }] = await Promise.all([
+      const [{ data: profileRows }, { data: accountRows }, { data: categoryRows }, { data: txRows }, { data: despesasPrevistasRows }, { data: contasReceberRows }, { data: recurringRows }, { data: pendingEditsRows }, { data: employeeRows }, { data: payrollRows }, { data: payrollPaymentRows }, { data: overtimeRows }, { data: hrDocTypeRows }, { data: hrDocRows }, { data: agreementRows }, { data: installmentRows }] = await Promise.all([
         supabase.from("profiles").select("*").order("name"),
         supabase.from("accounts").select("*").order("created_at"),
         supabase.from("categories").select("*").order("name"),
@@ -2309,6 +2802,11 @@ export default function App() {
         supabase.from("employees").select("*").order("nome"),
         supabase.from("payroll_entries").select("*"),
         supabase.from("payroll_payments").select("*"),
+        supabase.from("overtime_entries").select("*"),
+        supabase.from("hr_document_types").select("*").order("nome"),
+        supabase.from("hr_documents").select("*"),
+        supabase.from("agreements").select("*"),
+        supabase.from("agreement_installments").select("*"),
       ]);
       if (cancelled) return;
       setProfiles(profileRows || []);
@@ -2324,6 +2822,11 @@ export default function App() {
       setEmployees(employeeRows || []);
       setPayrollEntries((payrollRows || []).map((p) => ({ ...p, salario: Number(p.salario), adiantamento: Number(p.adiantamento), vale_mercado: Number(p.vale_mercado), horas_extras: Number(p.horas_extras), ajuda_custo: Number(p.ajuda_custo), outros_proventos: Number(p.outros_proventos), descontos: Number(p.descontos) })));
       setPayrollPayments((payrollPaymentRows || []).map((p) => ({ ...p, valor_pago: Number(p.valor_pago) })));
+      setOvertimeEntries((overtimeRows || []).map((o) => ({ ...o, quantidade_horas: Number(o.quantidade_horas), percentual: Number(o.percentual), valor_calculado: Number(o.valor_calculado) })));
+      setHrDocumentTypes(hrDocTypeRows || []);
+      setHrDocuments(hrDocRows || []);
+      setAgreements((agreementRows || []).map((a) => ({ ...a, valor_total: Number(a.valor_total), valor_parcela: Number(a.valor_parcela) })));
+      setAgreementInstallments((installmentRows || []).map((p) => ({ ...p, valor: Number(p.valor), valor_pago: Number(p.valor_pago) })));
       setDataLoading(false);
     }
     loadAll();
@@ -2341,6 +2844,11 @@ export default function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "employees" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "payroll_entries" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "payroll_payments" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "overtime_entries" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "hr_document_types" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "hr_documents" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "agreements" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "agreement_installments" }, () => loadAll())
       .subscribe();
     channelRef.current = channel;
 
@@ -2578,6 +3086,76 @@ export default function App() {
     setErrorBanner(""); return true;
   };
 
+  // ---------- RH: Horas extras ----------
+  const addOvertimeEntry = async (o) => {
+    const { error } = await supabase.from("overtime_entries").insert({ ...o, created_by: currentUser.id });
+    if (error) { setErrorBanner("Não consegui salvar: " + error.message); return false; }
+    // soma todas as horas extras dessa competência e já alimenta a folha (cria a linha se não existir)
+    const todasDoMes = [...overtimeEntries, o].filter((x) => x.funcionario_id === o.funcionario_id && x.competencia === o.competencia);
+    const somaValor = todasDoMes.reduce((s, x) => s + x.valor_calculado, 0);
+    const existente = payrollEntries.find((p) => p.funcionario_id === o.funcionario_id && p.competencia === o.competencia);
+    if (existente) {
+      await supabase.from("payroll_entries").update({ horas_extras: somaValor }).eq("id", existente.id);
+    } else {
+      const funcionario = employees.find((f) => f.id === o.funcionario_id);
+      await supabase.from("payroll_entries").insert({
+        funcionario_id: o.funcionario_id, competencia: o.competencia, salario: funcionario?.salario_base || 0,
+        horas_extras: somaValor, data_prevista_pagamento: o.competencia, created_by: currentUser.id,
+      });
+    }
+    setErrorBanner(""); return true;
+  };
+
+  // ---------- RH: Documentos ----------
+  const addHrDocumentType = async (nome) => {
+    const { error } = await supabase.from("hr_document_types").insert({ nome });
+    if (error) { setErrorBanner("Não consegui salvar o tipo: " + error.message); return false; }
+    setErrorBanner(""); return true;
+  };
+  const addHrDocument = async (d) => {
+    const { error } = await supabase.from("hr_documents").insert({ ...d, created_by: currentUser.id });
+    if (error) { setErrorBanner("Não consegui salvar o documento: " + error.message); return false; }
+    setErrorBanner(""); return true;
+  };
+
+  // ---------- RH: Acordos ----------
+  const addAgreement = async (a) => {
+    const { data: agRow, error } = await supabase.from("agreements").insert({ ...a, created_by: currentUser.id }).select().single();
+    if (error) { setErrorBanner("Não consegui salvar o acordo: " + error.message); return false; }
+    const parcelas = [];
+    let somaParcelas = 0;
+    for (let i = 1; i <= a.qtd_parcelas; i++) {
+      const venc = new Date(a.primeiro_vencimento + "T00:00:00");
+      venc.setMonth(venc.getMonth() + (i - 1));
+      const valor = i === a.qtd_parcelas ? a.valor_total - somaParcelas : Math.round(a.valor_parcela * 100) / 100;
+      somaParcelas += valor;
+      parcelas.push({ acordo_id: agRow.id, numero_parcela: i, vencimento: venc.toISOString().slice(0, 10), valor });
+    }
+    const { error: errParcelas } = await supabase.from("agreement_installments").insert(parcelas);
+    if (errParcelas) { setErrorBanner("Acordo salvo, mas não consegui gerar as parcelas: " + errParcelas.message); return false; }
+    setErrorBanner(""); return true;
+  };
+  const pagarParcelaAcordo = async (parcela, acordo, { dataPagamento, valorPago, conta }) => {
+    const funcionario = employees.find((f) => f.id === acordo.funcionario_id);
+    const { data: txRow, error: txErr } = await supabase.from("transactions").insert(toDb({
+      type: "despesa", date: dataPagamento, valor: valorPago, conta, categoria: "Acordos",
+      pessoa: funcionario?.nome, descricao: `Acordo — parcela ${parcela.numero_parcela}/${acordo.qtd_parcelas} — ${funcionario?.nome || ""}`,
+      conferido: false, createdBy: currentUser.name, createdByUid: currentUser.id,
+    })).select().single();
+    if (txErr) { setErrorBanner("Não consegui registrar o pagamento: " + txErr.message); return false; }
+    const novoValorPago = parcela.valor_pago + valorPago;
+    const novoStatus = novoValorPago >= parcela.valor - 0.009 ? "paga" : "parcial";
+    const { error: errParc } = await supabase.from("agreement_installments").update({
+      valor_pago: novoValorPago, status: novoStatus, data_pagamento: dataPagamento, conta_id: conta, transaction_id: txRow.id,
+    }).eq("id", parcela.id);
+    if (errParc) { setErrorBanner("Pagamento lançado, mas não consegui atualizar a parcela: " + errParc.message); return false; }
+    // se todas as parcelas desse acordo estão pagas, marca o acordo como quitado
+    const outrasParcelas = agreementInstallments.filter((p) => p.acordo_id === acordo.id && p.id !== parcela.id);
+    const todasPagas = outrasParcelas.every((p) => p.status === "paga") && novoStatus === "paga";
+    if (todasPagas) await supabase.from("agreements").update({ status: "quitado" }).eq("id", acordo.id);
+    setErrorBanner(""); return true;
+  };
+
   const changeRole = async (u, role) => {
     const { error } = await supabase.from("profiles").update({ role }).eq("id", u.id);
     if (error) setErrorBanner("Não consegui alterar o perfil: " + error.message);
@@ -2662,6 +3240,10 @@ export default function App() {
           {tab === "relatorios" && <RelatoriosView transactions={transactions} accounts={accounts} engine={engine} />}
           {tab === "funcionarios" && <FuncionariosView employees={employees} canManage={role.canLancar} onAdd={addEmployee} onEdit={editEmployee} onToggleStatus={toggleEmployeeStatus} />}
           {tab === "folha" && <FolhaPagamentoView employees={employees} payrollEntries={payrollEntries} payrollPayments={payrollPayments} accounts={accounts} canManage={role.canLancar} onEnsureEntries={ensurePayrollEntries} onUpdateField={updatePayrollField} onPagar={registrarPagamentoFolha} />}
+          {tab === "horas-extras" && <HorasExtrasView overtimeEntries={overtimeEntries} employees={employees} canManage={role.canLancar} onAdd={addOvertimeEntry} />}
+          {tab === "documentos-rh" && <DocumentosView documentos={hrDocuments} tipos={hrDocumentTypes} employees={employees} canManage={role.canLancar} onAdd={addHrDocument} onAddTipo={addHrDocumentType} />}
+          {tab === "acordos" && <AcordosView agreements={agreements} installments={agreementInstallments} employees={employees} accounts={accounts} canManage={role.canLancar} onAdd={addAgreement} onPagar={pagarParcelaAcordo} />}
+          {tab === "dashboard-rh" && <RHDashboardView employees={employees} payrollEntries={payrollEntries} payrollPayments={payrollPayments} overtimeEntries={overtimeEntries} documentos={hrDocuments} agreements={agreements} installments={agreementInstallments} />}
           {tab === "config" && <ConfiguracoesView profiles={profiles} currentUser={currentUser} onChangeRole={changeRole} />}
 
           <p className="text-center text-xs mt-8 mb-4 fin-no-print" style={{ color: "var(--ink-soft)", opacity: 0.6 }}>Sistema Power</p>
