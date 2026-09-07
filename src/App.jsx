@@ -777,7 +777,7 @@ function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, o
                   <tr key={t.id} className="border-t" style={{ borderColor: "var(--line)" }}>
                     <td className="px-3 py-2 whitespace-nowrap fin-mono text-xs">{fmtDate(t.date)}</td>
                     <td className="px-3 py-2 whitespace-nowrap"><Pill tone={meta?.tone}>{meta?.label}</Pill></td>
-                    <td className="px-3 py-2 max-w-[220px] truncate" title={t.descricao}>
+                    <td className="px-3 py-2 max-w-[340px] truncate" title={t.descricao}>
                       {t.descricao
                         ? <>{t.descricao}{t.pessoa ? <span style={{ color: "var(--ink-soft)" }}> · {t.pessoa}</span> : ""}</>
                         : (t.pessoa || <span style={{ color: "var(--ink-soft)" }}>—</span>)}
@@ -1264,7 +1264,7 @@ export default function App() {
           <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold" style={{ background: "var(--gold-soft)", color: "var(--gold)" }}>{currentUser.name.slice(0, 2).toUpperCase()}</div>
         </div>
 
-        <div className="p-4 md:p-7 max-w-6xl mx-auto">
+        <div className={`p-4 md:p-7 mx-auto ${tab === "fluxo" ? "max-w-full" : "max-w-6xl"}`}>
           <div className="hidden md:flex items-center justify-between mb-6">
             <h1 className="fin-display text-2xl font-semibold">{NAV.find((n) => n.key === tab)?.label}</h1>
             <Btn variant="gold" icon={Plus} onClick={() => openQuick("despesa")}>Novo lançamento</Btn>
