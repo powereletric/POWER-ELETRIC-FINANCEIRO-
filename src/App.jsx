@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
+  PieChart, Pie, Cell, Legend, Treemap
 } from "recharts";
 
 /* ============================================================
@@ -20,9 +20,10 @@ import {
    ============================================================ */
 
 const ROLES = {
-  admin: { label: "Administrador", canDelete: true, canManageUsers: true, canManageConfig: true },
-  financeiro: { label: "Financeiro", canDelete: false, canManageUsers: false, canManageConfig: false },
-  lancamento: { label: "Usuário de lançamento", canDelete: false, canManageUsers: false, canManageConfig: false },
+  admin: { label: "Administrador", canDelete: true, canManageUsers: true, canManageConfig: true, canLancar: true, isSocio: false },
+  financeiro: { label: "Financeiro", canDelete: false, canManageUsers: false, canManageConfig: false, canLancar: true, isSocio: false },
+  lancamento: { label: "Usuário de lançamento", canDelete: false, canManageUsers: false, canManageConfig: false, canLancar: true, isSocio: false },
+  socio: { label: "Sócio", canDelete: false, canManageUsers: false, canManageConfig: false, canLancar: false, isSocio: true },
 };
 
 const fmtBRL = (v) => (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -449,10 +450,11 @@ function EditTransactionModal({ tx, accounts, categories, currentUser, onClose, 
 /* ============================================================
    MODAIS: BAIXA DE ADIANTAMENTO / DEVOLUÇÃO / PAGAMENTO DE REEMBOLSO
    ============================================================ */
-function BaixaAdiantamentoModal({ adiantamento, categories, currentUser, onClose, onSave }) {
+function BaixaAdiantamentoModal({ adiantamento, categories, accounts, currentUser, onClose, onSave }) {
   const [valor, setValor] = useState("");
   const [categoria, setCategoria] = useState(categories[0]?.name || "");
   const [descricao, setDescricao] = useState("");
+  const [conta, setConta] = useState(adiantamento.conta || accounts[0]?.id || "");
   const [date, setDate] = useState(todayISO());
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
@@ -463,7 +465,7 @@ function BaixaAdiantamentoModal({ adiantamento, categories, currentUser, onClose
     if (v > adiantamento.saldoAPrestar + 0.009) { setErr(`O saldo disponível com ${adiantamento.pessoa} é de ${fmtBRL(adiantamento.saldoAPrestar)}.`); return; }
     setSaving(true);
     const ok = await onSave({
-      type: "baixa_adiantamento", date, valor: v, categoria, descricao: descricao.trim(),
+      type: "baixa_adiantamento", date, valor: v, categoria, descricao: descricao.trim(), conta,
       pessoa: adiantamento.pessoa, refAdiantamentoId: adiantamento.id, conferido: false,
       createdBy: currentUser.name, createdByUid: currentUser.id,
     });
@@ -478,6 +480,9 @@ function BaixaAdiantamentoModal({ adiantamento, categories, currentUser, onClose
       </Card>
       <Field label="Data"><TextInput type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
       <Field label="Valor gasto (R$)" required><TextInput inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></Field>
+      <Field label="Conta que originou esse dinheiro">
+        <Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select>
+      </Field>
       <Field label="Categoria"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</Select></Field>
       <Field label="Descrição"><TextInput value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex: Combustível" /></Field>
       {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
@@ -562,7 +567,18 @@ function PagamentoReembolsoModal({ reembolso, accounts, currentUser, onClose, on
 /* ============================================================
    VIEW: DASHBOARD
    ============================================================ */
-function DashboardView({ accounts, transactions, engine, onQuickAction }) {
+const CATEGORY_EMOJI = [
+  [/alimenta/i, "🍽️"], [/combust/i, "⛽"], [/sal[aá]rio/i, "👷"], [/manuten|pneu/i, "🔧"],
+  [/fornecedor/i, "🧾"], [/imposto|taxa/i, "🏛️"], [/s[oó]cio/i, "👥"], [/reembolso/i, "↩️"],
+  [/transporte|frete/i, "🚚"], [/material|equipamento/i, "🧰"], [/hospedagem/i, "🏨"],
+  [/jur[ií]dico/i, "⚖️"], [/contabilidade/i, "📑"], [/servi[cç]o/i, "🛠️"], [/adiantamento/i, "💵"],
+];
+function categoryEmoji(name) {
+  const hit = CATEGORY_EMOJI.find(([re]) => re.test(name || ""));
+  return hit ? hit[1] : "📂";
+}
+
+function DashboardView({ accounts, transactions, engine, onQuickAction, role }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -598,14 +614,16 @@ function DashboardView({ accounts, transactions, engine, onQuickAction }) {
         </div>
       </Card>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {quick.map((q) => (
-          <button key={q.type} onClick={() => onQuickAction(q.type)} className="fin-btn fin-card fin-focus rounded-xl p-4 text-left" style={{ background: "var(--panel)", border: "1px solid var(--line)" }}>
-            <q.icon size={22} style={{ color: q.tone }} />
-            <p className="font-semibold text-sm mt-2">{q.label}</p>
-          </button>
-        ))}
-      </div>
+      {!role?.isSocio && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {quick.map((q) => (
+            <button key={q.type} onClick={() => onQuickAction(q.type)} className="fin-btn fin-card fin-focus rounded-xl p-4 text-left" style={{ background: "var(--panel)", border: "1px solid var(--line)" }}>
+              <q.icon size={22} style={{ color: q.tone }} />
+              <p className="font-semibold text-sm mt-2">{q.label}</p>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex items-center gap-2 flex-wrap">
         <Select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ width: 160 }}>
@@ -619,14 +637,30 @@ function DashboardView({ accounts, transactions, engine, onQuickAction }) {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <button onClick={() => setDrill("receitas")} className="fin-btn fin-card fin-focus text-left rounded-xl" style={{ cursor: receitasPeriodo.length ? "pointer" : "default" }}>
-          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Recebido no mês</p><Money v={totals.receitas} tone="pos" size="lg" /></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>💰 Recebido no mês</p><Money v={totals.receitas} tone="pos" size="lg" /></Card>
         </button>
         <button onClick={() => setDrill("despesas")} className="fin-btn fin-card fin-focus text-left rounded-xl" style={{ cursor: despesasPeriodo.length ? "pointer" : "default" }}>
-          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Despesas reais no mês</p><Money v={totals.despesas} tone="neg" size="lg" /></Card>
+          <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>💸 Despesas do mês</p><Money v={totals.despesas} tone="neg" size="lg" /></Card>
         </button>
-        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Transferências internas</p><Money v={totals.transferencias} size="lg" /></Card>
-        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Saldo do mês</p><Money v={totals.saldoPeriodo} tone={totals.saldoPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🔄 Transferências internas</p><Money v={totals.transferencias} size="lg" /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>💵 Saldo do mês</p><Money v={totals.saldoPeriodo} tone={totals.saldoPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
       </div>
+
+      {despesasPorCategoria.length > 0 && (
+        <div>
+          <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Com o que a Power gastou este mês</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {despesasPorCategoria.map((c) => (
+              <button key={c.name} onClick={() => { setDrill("despesas"); setDrillCategoria(c.name); }} className="fin-btn fin-card fin-focus text-left rounded-xl">
+                <Card>
+                  <p className="text-xs truncate" style={{ color: "var(--ink-soft)" }}>{categoryEmoji(c.name)} {c.name}</p>
+                  <Money v={c.value} tone="neg" />
+                </Card>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {drill === "receitas" && (
         <Modal title={`Recebimentos — ${monthLabel(month, year)}`} onClose={closeDrill} wide>
@@ -717,16 +751,41 @@ const TYPE_LABELS = {
 };
 function accName(accounts, id) { return accounts.find((a) => a.id === id)?.name || "—"; }
 
-function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, onEdit, canDelete }) {
+function FluxoCaixaView({ transactions, accounts, categories, onToggleConferido, onDelete, onEdit, canDelete }) {
   const [onlyPending, setOnlyPending] = useState(false);
   const [typeFilter, setTypeFilter] = useState("todos");
   const [accountFilter, setAccountFilter] = useState("todas");
+  const [categoriaFilter, setCategoriaFilter] = useState("todas");
+  const [dataInicial, setDataInicial] = useState("");
+  const [dataFinal, setDataFinal] = useState("");
   const [q, setQ] = useState("");
+
+  // saldo consolidado da empresa acumulado até cada lançamento (em ordem cronológica real,
+  // independente dos filtros aplicados na tela — assim o saldo mostrado sempre bate com a realidade)
+  const saldoAcumuladoPorId = useMemo(() => {
+    const inicio = accounts.reduce((s, a) => s + (a.saldoInicial || 0), 0);
+    const chron = [...transactions].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || "").localeCompare(b.createdAt || ""));
+    let acc = inicio;
+    const map = {};
+    chron.forEach((t) => {
+      if (t.type === "receita") acc += t.valor;
+      else if (t.type === "despesa" && !t.pendenteReembolso) acc -= t.valor;
+      else if (t.type === "adiantamento") acc -= t.valor;
+      else if (t.type === "devolucao_adiantamento") acc += t.valor;
+      else if (t.type === "reembolso_pagamento") acc -= t.valor;
+      else if (t.type === "ajuste") acc += t.valor;
+      map[t.id] = acc;
+    });
+    return map;
+  }, [transactions, accounts]);
 
   const sorted = [...transactions].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
   const filtered = sorted.filter((t) => {
     if (onlyPending && t.conferido) return false;
     if (typeFilter !== "todos" && t.type !== typeFilter) return false;
+    if (categoriaFilter !== "todas" && t.categoria !== categoriaFilter) return false;
+    if (dataInicial && (t.date || "") < dataInicial) return false;
+    if (dataFinal && (t.date || "") > dataFinal) return false;
     if (accountFilter !== "todas") {
       const accs = [t.conta, t.contaOrigem, t.contaDestino].filter(Boolean);
       if (!accs.includes(accountFilter)) return false;
@@ -740,17 +799,23 @@ function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, o
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 items-center">
-        <TextInput placeholder="Buscar por descrição, pessoa, categoria..." value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 280 }} />
-        <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={{ width: 190 }}>
+      <div className="flex flex-wrap gap-2 items-end">
+        <TextInput placeholder="Buscar por descrição, pessoa, categoria..." value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 260 }} />
+        <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={{ width: 180 }}>
           <option value="todos">Todos os tipos</option>
           {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </Select>
-        <Select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} style={{ width: 180 }}>
+        <Select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} style={{ width: 170 }}>
           <option value="todas">Todas as contas</option>
           {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </Select>
-        <label className="flex items-center gap-1.5 text-sm cursor-pointer ml-auto">
+        <Select value={categoriaFilter} onChange={(e) => setCategoriaFilter(e.target.value)} style={{ width: 170 }}>
+          <option value="todas">Todas as categorias</option>
+          {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+        </Select>
+        <Field label="De"><TextInput type="date" value={dataInicial} onChange={(e) => setDataInicial(e.target.value)} style={{ width: 150 }} /></Field>
+        <Field label="Até"><TextInput type="date" value={dataFinal} onChange={(e) => setDataFinal(e.target.value)} style={{ width: 150 }} /></Field>
+        <label className="flex items-center gap-1.5 text-sm cursor-pointer ml-auto mb-3">
           <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} />Somente não conferidos
         </label>
       </div>
@@ -760,7 +825,7 @@ function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, o
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
-                {["Data", "Tipo", "Descrição", "Conta", "Categoria", "Entrada", "Saída"].map((h) => (
+                {["Data", "Tipo", "Descrição", "Conta", "Categoria", "Entrada", "Saída", "Saldo"].map((h) => (
                   <th key={h} className="text-left px-3 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
                 ))}
                 <th className="text-center px-2 py-2 font-medium text-xs whitespace-nowrap" style={{ position: "sticky", right: 80, width: 40, minWidth: 40, maxWidth: 40, background: "#F0ECE0", boxShadow: "-4px 0 4px -2px rgba(0,0,0,0.08)", zIndex: 2 }}>Conf.</th>
@@ -769,7 +834,7 @@ function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, o
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && <tr><td colSpan={9}><EmptyState text="Nenhum lançamento encontrado." /></td></tr>}
+              {filtered.length === 0 && <tr><td colSpan={11}><EmptyState text="Nenhum lançamento encontrado." /></td></tr>}
               {filtered.map((t) => {
                 const meta = TYPE_LABELS[t.type];
                 const contaTxt = t.type === "transferencia" ? `${accName(accounts, t.contaOrigem)} → ${accName(accounts, t.contaDestino)}` : accName(accounts, t.conta);
@@ -787,6 +852,7 @@ function FluxoCaixaView({ transactions, accounts, onToggleConferido, onDelete, o
                     <td className="px-3 py-2 whitespace-nowrap text-xs">{t.categoria || "—"}</td>
                     <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--green)" }}>{["receita", "devolucao_adiantamento", "transferencia"].includes(t.type) ? fmtBRL(t.valor) : ""}</td>
                     <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--red)" }}>{((t.type === "despesa" && !t.pendenteReembolso) || t.type === "adiantamento" || t.type === "reembolso_pagamento") ? fmtBRL(t.valor) : ""}</td>
+                    <td className="px-3 py-2 fin-mono text-xs whitespace-nowrap">{fmtBRL(saldoAcumuladoPorId[t.id])}</td>
                     <td className="px-2 py-2 text-center" style={{ position: "sticky", right: 80, width: 40, minWidth: 40, maxWidth: 40, background: "var(--panel)", boxShadow: "-4px 0 4px -2px rgba(0,0,0,0.08)", zIndex: 1 }}>
                       <button onClick={() => onToggleConferido(t)} className="fin-focus" title="Marcar conferido">
                         {t.conferido ? <Check size={16} style={{ color: "var(--green)" }} /> : <Clock size={16} style={{ color: "var(--ink-soft)" }} />}
@@ -1095,6 +1161,12 @@ const NAV = [
   { key: "relatorios", label: "Relatórios", icon: BarChart3 },
   { key: "config", label: "Configurações", icon: Settings },
 ];
+// Sócios (Elisângela, Gilmar) veem uma navegação simplificada — só visão gerencial, sem telas operacionais
+const NAV_SOCIO = [
+  { key: "dashboard", label: "Dashboard", icon: Home },
+  { key: "relatorios", label: "Relatórios", icon: BarChart3 },
+  { key: "contas", label: "Contas", icon: Landmark },
+];
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = carregando, null = deslogado
@@ -1155,6 +1227,7 @@ export default function App() {
 
   const engine = useFinanceEngine(transactions, accounts);
   const role = currentUser ? (ROLES[currentUser.role] || ROLES.lancamento) : ROLES.lancamento;
+  const navItems = role.isSocio ? NAV_SOCIO : NAV;
 
   const addTransaction = async (tx) => {
     const { error } = await supabase.from("transactions").insert(toDb(tx));
@@ -1226,7 +1299,7 @@ export default function App() {
           <BrandMark /><span className="fin-display text-white font-semibold text-lg">Caixa</span>
         </div>
         <nav className="flex-1 space-y-1">
-          {NAV.map((n) => (
+          {navItems.map((n) => (
             <button key={n.key} onClick={() => setTab(n.key)} className="fin-focus fin-btn w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm"
               style={{ background: tab === n.key ? "rgba(241,230,195,0.14)" : "transparent", color: tab === n.key ? "#F1E6C3" : "#C7CEDC" }}>
               <n.icon size={17} />{n.label}
@@ -1245,7 +1318,7 @@ export default function App() {
           <aside className="absolute left-0 top-0 bottom-0 w-64 p-4" style={{ background: "var(--navy)" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-8 px-1"><BrandMark /><span className="fin-display text-white font-semibold text-lg">Caixa</span></div>
             <nav className="space-y-1">
-              {NAV.map((n) => (
+              {navItems.map((n) => (
                 <button key={n.key} onClick={() => { setTab(n.key); setNavOpen(false); }} className="fin-focus fin-btn w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm"
                   style={{ background: tab === n.key ? "rgba(241,230,195,0.14)" : "transparent", color: tab === n.key ? "#F1E6C3" : "#C7CEDC" }}>
                   <n.icon size={17} />{n.label}
@@ -1260,20 +1333,20 @@ export default function App() {
       <main className="flex-1 min-w-0">
         <div className="md:hidden flex items-center justify-between px-4 py-3" style={{ background: "var(--navy)" }}>
           <button onClick={() => setNavOpen(true)} className="fin-focus text-white"><ChevronDown className="rotate-90" size={22} /></button>
-          <span className="fin-display text-white font-semibold">{NAV.find((n) => n.key === tab)?.label}</span>
+          <span className="fin-display text-white font-semibold">{navItems.find((n) => n.key === tab)?.label}</span>
           <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold" style={{ background: "var(--gold-soft)", color: "var(--gold)" }}>{currentUser.name.slice(0, 2).toUpperCase()}</div>
         </div>
 
         <div className={`p-4 md:p-7 mx-auto ${tab === "fluxo" ? "max-w-full" : "max-w-6xl"}`}>
           <div className="hidden md:flex items-center justify-between mb-6">
-            <h1 className="fin-display text-2xl font-semibold">{NAV.find((n) => n.key === tab)?.label}</h1>
-            <Btn variant="gold" icon={Plus} onClick={() => openQuick("despesa")}>Novo lançamento</Btn>
+            <h1 className="fin-display text-2xl font-semibold">{navItems.find((n) => n.key === tab)?.label}</h1>
+            {role.canLancar && <Btn variant="gold" icon={Plus} onClick={() => openQuick("despesa")}>Novo lançamento</Btn>}
           </div>
 
           {errorBanner && <Card className="mb-4" style={{ background: "var(--red-soft)", border: "none" }}><p className="text-sm" style={{ color: "var(--red)" }}>{errorBanner}</p></Card>}
 
-          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} />}
-          {tab === "fluxo" && <FluxoCaixaView transactions={transactions} accounts={accounts} onToggleConferido={toggleConferido} onDelete={deleteTransaction} onEdit={(t) => setModal({ kind: "edit-tx", tx: t })} canDelete={role.canDelete} />}
+          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} />}
+          {tab === "fluxo" && <FluxoCaixaView transactions={transactions} accounts={accounts} categories={categories} onToggleConferido={toggleConferido} onDelete={deleteTransaction} onEdit={(t) => setModal({ kind: "edit-tx", tx: t })} canDelete={role.canDelete} />}
           {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} />}
           {tab === "reembolsos" && <ReembolsosView engine={engine} onPagar={(r) => setModal({ kind: "reembolso", reembolso: r })} />}
           {tab === "contas" && <ContasView accounts={accounts} engine={engine} onAdd={addAccount} onToggleActive={toggleAccountActive} canManage={role.canManageConfig} />}
@@ -1282,14 +1355,16 @@ export default function App() {
           {tab === "config" && <ConfiguracoesView profiles={profiles} currentUser={currentUser} onChangeRole={changeRole} />}
         </div>
 
-        <button onClick={() => openQuick("despesa")} className="md:hidden fixed bottom-5 right-5 w-14 h-14 rounded-full flex items-center justify-center shadow-lg fin-focus" style={{ background: "var(--gold)", color: "#fff" }}>
-          <Plus size={26} />
-        </button>
+        {role.canLancar && (
+          <button onClick={() => openQuick("despesa")} className="md:hidden fixed bottom-5 right-5 w-14 h-14 rounded-full flex items-center justify-center shadow-lg fin-focus" style={{ background: "var(--gold)", color: "#fff" }}>
+            <Plus size={26} />
+          </button>
+        )}
       </main>
 
       {modal?.kind === "tx" && <TransactionModal initialType={modal.type} accounts={accounts} categories={categories} currentUser={currentUser} onClose={() => setModal(null)} onSave={addTransaction} />}
       {modal?.kind === "edit-tx" && <EditTransactionModal tx={modal.tx} accounts={accounts} categories={categories} currentUser={currentUser} onClose={() => setModal(null)} onSave={updateTransaction} />}
-      {modal?.kind === "baixa" && <BaixaAdiantamentoModal adiantamento={modal.adiantamento} categories={categories.filter((c) => c.active)} currentUser={currentUser} onClose={() => setModal(null)} onSave={addTransaction} />}
+      {modal?.kind === "baixa" && <BaixaAdiantamentoModal adiantamento={modal.adiantamento} categories={categories.filter((c) => c.active)} accounts={accounts.filter((a) => a.active)} currentUser={currentUser} onClose={() => setModal(null)} onSave={addTransaction} />}
       {modal?.kind === "devolucao" && <DevolucaoAdiantamentoModal adiantamento={modal.adiantamento} accounts={accounts.filter((a) => a.active)} currentUser={currentUser} onClose={() => setModal(null)} onSave={addTransaction} />}
       {modal?.kind === "reembolso" && <PagamentoReembolsoModal reembolso={modal.reembolso} accounts={accounts.filter((a) => a.active)} currentUser={currentUser} onClose={() => setModal(null)} onSave={addTransaction} />}
     </div>
