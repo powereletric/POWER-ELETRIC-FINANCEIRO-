@@ -25,3 +25,11 @@ body { font-family:'Inter',sans-serif; color:var(--ink); background:var(--paper)
 .fin-card { transition: box-shadow .15s ease, transform .15s ease; }
 .fin-focus:focus { outline:2px solid var(--gold); outline-offset:1px; }
 @media (prefers-reduced-motion: reduce) { .fin-btn, .fin-card { transition:none; } }
+
+/* Impressão / exportar PDF: esconde menu e botões, mostra só o relatório */
+@media print {
+  aside, .fin-no-print, button { display: none !important; }
+  main { width: 100% !important; }
+  .fin-print-only { display: block !important; margin-bottom: 12px; }
+  body { background: #fff; }
+}
