@@ -1352,12 +1352,13 @@ const CR_STATUS_LABELS = {
   a_receber: "A receber", recebido: "Recebido",
 };
 
-function NovaNotaModal({ onClose, onSave }) {
+function NovaNotaModal({ accounts, onClose, onSave }) {
   const [cliente, setCliente] = useState("");
   const [numeroNf, setNumeroNf] = useState("");
   const [valor, setValor] = useState("");
   const [dataEmissao, setDataEmissao] = useState(todayISO());
-  const [prazoDias, setPrazoDias] = useState("30");
+  const [dataPrevista, setDataPrevista] = useState(todayISO());
+  const [conta, setConta] = useState(accounts[0]?.id || "");
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1365,14 +1366,12 @@ function NovaNotaModal({ onClose, onSave }) {
     const v = parseFloat(String(valor).replace(",", "."));
     if (!cliente.trim()) { setErr("Informe o cliente."); return; }
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
+    if (!dataPrevista) { setErr("Informe a data prevista de recebimento."); return; }
     setSaving(true);
-    const prazo = parseInt(prazoDias, 10) || 0;
-    const dataPrevista = new Date(dataEmissao + "T00:00:00");
-    dataPrevista.setDate(dataPrevista.getDate() + prazo);
     const ok = await onSave({
       cliente: cliente.trim(), numero_nf: numeroNf.trim(), valor: v, status: "a_receber",
-      data_emissao_nf: dataEmissao, prazo_pagamento_dias: prazo,
-      data_prevista_recebimento: dataPrevista.toISOString().slice(0, 10),
+      data_emissao_nf: dataEmissao, data_prevista_recebimento: dataPrevista,
+      conta_recebimento_id: conta || null,
     });
     setSaving(false);
     if (!ok) setErr("Não consegui salvar. Tente novamente.");
@@ -1386,9 +1385,10 @@ function NovaNotaModal({ onClose, onSave }) {
         <Field label="Nº da NF"><TextInput value={numeroNf} onChange={(e) => setNumeroNf(e.target.value)} /></Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Data de emissão"><TextInput type="date" value={dataEmissao} onChange={(e) => setDataEmissao(e.target.value)} /></Field>
-        <Field label="Prazo de pagamento (dias)"><TextInput inputMode="numeric" value={prazoDias} onChange={(e) => setPrazoDias(e.target.value)} /></Field>
+        <Field label="Data emitida"><TextInput type="date" value={dataEmissao} onChange={(e) => setDataEmissao(e.target.value)} /></Field>
+        <Field label="Data prevista" required><TextInput type="date" value={dataPrevista} onChange={(e) => setDataPrevista(e.target.value)} /></Field>
       </div>
+      <Field label="Conta prevista para o recebimento"><Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
       {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
       <div className="flex justify-end gap-2 mt-2">
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
@@ -1402,7 +1402,7 @@ function MarcarRecebidoModal({ nota, accounts, onClose, onSave }) {
   const [dataRecebimento, setDataRecebimento] = useState(todayISO());
   const [valorRecebido, setValorRecebido] = useState(String(nota.valor).replace(".", ","));
   const [valorBloqueado, setValorBloqueado] = useState("0");
-  const [conta, setConta] = useState(accounts[0]?.id || "");
+  const [conta, setConta] = useState(nota.conta_recebimento_id || accounts[0]?.id || "");
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1492,9 +1492,21 @@ function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcar
     bloqueado: recebidas.reduce((s, n) => s + (n.valor_bloqueado || 0), 0),
     disponivel: recebidas.reduce((s, n) => s + ((n.valor_recebido || n.valor) - (n.valor_bloqueado || 0)), 0),
   };
+  const totalGeral = contasReceber.reduce((s, n) => s + n.valor, 0);
+  const percentRecebido = totalGeral > 0 ? (totais.recebido / totalGeral) * 100 : 0;
 
   return (
     <div className="space-y-5">
+      <Card style={{ background: "var(--navy)", border: "none" }} className="text-white">
+        <p className="text-xs uppercase tracking-wide mb-2" style={{ color: "var(--gold-soft)" }}>Resumo do mês</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div><p className="text-xs" style={{ color: "#C7CEDC" }}>Total previsto</p><p className="fin-mono font-semibold text-lg">{fmtBRL(totalGeral)}</p></div>
+          <div><p className="text-xs" style={{ color: "#C7CEDC" }}>Total recebido</p><p className="fin-mono font-semibold text-lg">{fmtBRL(totais.recebido)}</p></div>
+          <div><p className="text-xs" style={{ color: "#C7CEDC" }}>A receber</p><p className="fin-mono font-semibold text-lg">{fmtBRL(totais.previsto)}</p></div>
+          <div><p className="text-xs" style={{ color: "#C7CEDC" }}>% recebido</p><p className="fin-mono font-semibold text-lg">{percentRecebido.toFixed(1)}%</p></div>
+        </div>
+      </Card>
+
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>A receber</p><Money v={totais.previsto} /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Em atraso</p><Money v={totais.atrasado} tone="neg" /></Card>
@@ -1548,7 +1560,7 @@ function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcar
         </div>
       )}
 
-      {modal?.kind === "nova" && <NovaNotaModal onClose={() => setModal(null)} onSave={async (n) => { const ok = await onAdd(n); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "nova" && <NovaNotaModal accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (n) => { const ok = await onAdd(n); if (ok) setModal(null); return ok; }} />}
       {modal?.kind === "receber" && <MarcarRecebidoModal nota={modal.nota} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (n, p) => { const ok = await onMarcarRecebido(n, p); if (ok) setModal(null); return ok; }} />}
       {modal?.kind === "liberar" && <LiberarBloqueioModal nota={modal.nota} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (n, p) => { const ok = await onLiberarBloqueio(n, p); if (ok) setModal(null); return ok; }} />}
     </div>
