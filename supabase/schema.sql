@@ -134,3 +134,14 @@ insert into categories (name) values
   ('Taxas bancárias'), ('Reembolso'), ('Despesas pessoais/sócios'),
   ('Despesas administrativas'), ('Contabilidade'), ('Jurídico'), ('Serviços'), ('Outros')
 on conflict do nothing;
+
+-- ============================================================
+-- MIGRAÇÃO 07/09/2026 (2): perfil "sócio" (Elisângela e Gilmar) —
+-- visão gerencial simplificada, sem acesso a lançamentos operacionais.
+-- Já aplicado em produção via Supabase MCP.
+-- ============================================================
+alter table profiles drop constraint profiles_role_check;
+alter table profiles add constraint profiles_role_check
+  check (role in ('admin','financeiro','lancamento','socio'));
+comment on column profiles.role is
+  'admin = Alessandra; lancamento = quem lança (Alessandra, David); socio = visão gerencial (Elisângela, Gilmar)';
