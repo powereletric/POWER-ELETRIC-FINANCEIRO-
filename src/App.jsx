@@ -2152,13 +2152,15 @@ function AprovacoesView({ pendingEdits, transactions, isAdmin, onApprove, onReje
 /* ============================================================
    RH — FUNCIONÁRIOS
    ============================================================ */
-const CONTRATO_OPCOES = ["CLT", "PJ", "Temporário", "Estagiário", "Outro"];
+const CONTRATO_OPCOES = ["CLT", "PJ", "Temporário", "Intermitente", "Estagiário", "Outro"];
 
 function NovoFuncionarioModal({ onClose, onSave, editing }) {
   const [nome, setNome] = useState(editing?.nome || "");
+  const [empresa, setEmpresa] = useState(editing?.empresa || "Power Eletric");
   const [cargo, setCargo] = useState(editing?.cargo || "");
   const [tipoContrato, setTipoContrato] = useState(editing?.tipo_contrato || "CLT");
   const [salarioBase, setSalarioBase] = useState(editing ? String(editing.salario_base).replace(".", ",") : "");
+  const [valorHora, setValorHora] = useState(editing?.valor_hora ? String(editing.valor_hora).replace(".", ",") : "");
   const [periculosidade, setPericulosidade] = useState(editing?.periculosidade_insalubridade || "");
   const [valorAdicional, setValorAdicional] = useState(editing?.valor_adicional ? String(editing.valor_adicional).replace(".", ",") : "");
   const [unidade, setUnidade] = useState(editing?.unidade || "");
@@ -2166,14 +2168,19 @@ function NovoFuncionarioModal({ onClose, onSave, editing }) {
   const [observacoes, setObservacoes] = useState(editing?.observacoes || "");
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
+  const isIntermitente = tipoContrato === "Intermitente";
 
   const submit = async () => {
-    const sal = parseValorBR(salarioBase);
+    const sal = parseValorBR(salarioBase) || 0;
+    const hora = parseValorBR(valorHora) || 0;
     if (!nome.trim()) { setErr("Informe o nome."); return; }
-    if (!sal || sal <= 0) { setErr("Informe um salário-base válido."); return; }
+    if (isIntermitente) {
+      if (!hora || hora <= 0) { setErr("Informe o valor da hora."); return; }
+    } else if (!sal || sal <= 0) { setErr("Informe um salário-base válido."); return; }
     setSaving(true);
     const ok = await onSave({
-      nome: nome.trim(), cargo: cargo.trim(), tipo_contrato: tipoContrato, salario_base: sal,
+      nome: nome.trim(), empresa, cargo: cargo.trim(), tipo_contrato: tipoContrato,
+      salario_base: sal, valor_hora: hora || null,
       periculosidade_insalubridade: periculosidade || null,
       valor_adicional: parseValorBR(valorAdicional) || 0,
       unidade: unidade.trim(), data_admissao: dataAdmissao, observacoes: observacoes.trim(), status: "ativo",
@@ -2186,13 +2193,31 @@ function NovoFuncionarioModal({ onClose, onSave, editing }) {
     <Modal title={editing ? "Editar funcionário" : "Novo funcionário"} onClose={onClose}>
       <Field label="Nome" required><TextInput value={nome} onChange={(e) => setNome(e.target.value)} /></Field>
       <div className="grid grid-cols-2 gap-3">
+        <Field label="Empresa" required>
+          <Select value={empresa} onChange={(e) => setEmpresa(e.target.value)}>
+            <option value="Power Eletric">Power Eletric</option>
+            <option value="Power Equipamentos">Power Equipamentos</option>
+          </Select>
+        </Field>
         <Field label="Cargo/função"><TextInput value={cargo} onChange={(e) => setCargo(e.target.value)} /></Field>
-        <Field label="Tipo de contrato"><Select value={tipoContrato} onChange={(e) => setTipoContrato(e.target.value)}>{CONTRATO_OPCOES.map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Salário-base (R$)" required><TextInput inputMode="decimal" value={salarioBase} onChange={(e) => setSalarioBase(e.target.value)} placeholder="0,00" /></Field>
+        <Field label="Tipo de contrato"><Select value={tipoContrato} onChange={(e) => setTipoContrato(e.target.value)}>{CONTRATO_OPCOES.map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
         <Field label="Data de admissão"><TextInput type="date" value={dataAdmissao} onChange={(e) => setDataAdmissao(e.target.value)} /></Field>
       </div>
+      {isIntermitente ? (
+        <>
+          <Card className="mb-3" style={{ background: "var(--teal-soft)", border: "none" }}>
+            <p className="text-xs">Intermitente é pago por hora trabalhada, sem salário mensal fixo.</p>
+          </Card>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Valor da hora (R$)" required><TextInput inputMode="decimal" value={valorHora} onChange={(e) => setValorHora(e.target.value)} placeholder="0,00" /></Field>
+            <Field label="Salário-base (R$) — opcional"><TextInput inputMode="decimal" value={salarioBase} onChange={(e) => setSalarioBase(e.target.value)} placeholder="0,00" /></Field>
+          </div>
+        </>
+      ) : (
+        <Field label="Salário-base (R$)" required><TextInput inputMode="decimal" value={salarioBase} onChange={(e) => setSalarioBase(e.target.value)} placeholder="0,00" /></Field>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Periculosidade/Insalubridade">
           <Select value={periculosidade} onChange={(e) => setPericulosidade(e.target.value)}>
@@ -2226,23 +2251,43 @@ function FuncionariosView({ employees, canManage, onAdd, onEdit, onToggleStatus 
         {canManage && <Btn variant="gold" icon={Plus} className="ml-auto" onClick={() => setModal({ kind: "novo" })}>Novo funcionário</Btn>}
       </div>
       <Card className="p-0 overflow-hidden">
-        {filtro(ativos).length === 0 ? <div className="p-4"><EmptyState text="Nenhum funcionário ativo encontrado." /></div> : filtro(ativos).map((f, i) => (
-          <div key={f.id} className="flex items-center justify-between px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
-            <div>
-              <p className="text-sm font-medium">{f.nome} {f.periculosidade_insalubridade && <Pill tone="amber">{f.periculosidade_insalubridade}</Pill>}</p>
-              <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{f.cargo || "—"} · {f.tipo_contrato} · {f.unidade || "—"} · admitido em {fmtDate(f.data_admissao)}</p>
+        {filtro(ativos).length === 0 ? <div className="p-4"><EmptyState text="Nenhum funcionário ativo encontrado." /></div> : filtro(ativos).map((f, i) => {
+          const isIntermitente = f.tipo_contrato === "Intermitente";
+          const adicional = f.periculosidade_insalubridade ? (f.valor_adicional || 0) : 0;
+          const totalComAdicional = f.salario_base + adicional;
+          const valorHora = isIntermitente ? (f.valor_hora || 0) : f.salario_base / 220;
+          return (
+            <div key={f.id} className="flex items-center justify-between px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
+              <div>
+                <p className="text-sm font-medium">{f.nome} {f.periculosidade_insalubridade && <Pill tone="amber">{f.periculosidade_insalubridade}</Pill>} {isIntermitente && <Pill tone="teal">intermitente</Pill>}</p>
+                <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{f.empresa ? `${f.empresa} · ` : ""}{f.cargo || "—"} · {f.tipo_contrato} · {f.unidade || "—"} · admitido em {fmtDate(f.data_admissao)}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  {isIntermitente ? (
+                    <>
+                      <Money v={valorHora} size="sm" />
+                      <p className="text-xs" style={{ color: "var(--ink-soft)" }}>por hora{adicional > 0 ? ` + ${f.periculosidade_insalubridade} ${fmtBRL(adicional)}` : ""}</p>
+                    </>
+                  ) : (
+                    <>
+                      <Money v={totalComAdicional} size="sm" />
+                      <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
+                        {adicional > 0 ? `base ${fmtBRL(f.salario_base)} + ${f.periculosidade_insalubridade} ${fmtBRL(adicional)}` : `hora ≈ ${fmtBRL(valorHora)}`}
+                      </p>
+                    </>
+                  )}
+                </div>
+                {canManage && (
+                  <>
+                    <Btn variant="ghost" onClick={() => setModal({ kind: "editar", employee: f })}>Editar</Btn>
+                    <Btn variant="ghost" onClick={() => onToggleStatus(f)}>Desativar</Btn>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Money v={f.salario_base} size="sm" />
-              {canManage && (
-                <>
-                  <Btn variant="ghost" onClick={() => setModal({ kind: "editar", employee: f })}>Editar</Btn>
-                  <Btn variant="ghost" onClick={() => onToggleStatus(f)}>Desativar</Btn>
-                </>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </Card>
       {inativos.length > 0 && (
         <div>
@@ -2267,7 +2312,7 @@ function FuncionariosView({ employees, canManage, onAdd, onEdit, onToggleStatus 
    RH — FOLHA DE PAGAMENTO
    ============================================================ */
 function payrollTotal(p) {
-  return (p.salario || 0) + (p.adiantamento || 0) + (p.vale_mercado || 0) + (p.horas_extras || 0) + (p.ajuda_custo || 0) + (p.outros_proventos || 0) - (p.descontos || 0);
+  return (p.salario || 0) + (p.adiantamento || 0) + (p.vale_mercado || 0) + (p.vale_transporte || 0) + (p.vale_refeicao || 0) + (p.horas_extras || 0) + (p.ajuda_custo || 0) + (p.outros_proventos || 0) - (p.descontos || 0);
 }
 function payrollStatus(p, pago) {
   const total = payrollTotal(p);
@@ -2319,8 +2364,8 @@ function RegistrarPagamentoFolhaModal({ entry, funcionario, pendente, accounts, 
 
 function FolhaRow({ entry, funcionario, pagamentos, accounts, canManage, onUpdateField, onPagar }) {
   const [local, setLocal] = useState({
-    adiantamento: entry.adiantamento, vale_mercado: entry.vale_mercado, horas_extras: entry.horas_extras,
-    ajuda_custo: entry.ajuda_custo, outros_proventos: entry.outros_proventos, descontos: entry.descontos,
+    adiantamento: entry.adiantamento, vale_mercado: entry.vale_mercado, vale_transporte: entry.vale_transporte, vale_refeicao: entry.vale_refeicao,
+    horas_extras: entry.horas_extras, ajuda_custo: entry.ajuda_custo, outros_proventos: entry.outros_proventos, descontos: entry.descontos,
   });
   const pago = pagamentos.filter((p) => p.payroll_entry_id === entry.id).reduce((s, p) => s + p.valor_pago, 0);
   const total = payrollTotal({ ...entry, ...local });
@@ -2343,6 +2388,8 @@ function FolhaRow({ entry, funcionario, pagamentos, accounts, canManage, onUpdat
       <td className="px-3 py-2 fin-mono text-xs whitespace-nowrap">{fmtBRL(entry.salario)}</td>
       <td className="px-2 py-2">{numInput("adiantamento")}</td>
       <td className="px-2 py-2">{numInput("vale_mercado")}</td>
+      <td className="px-2 py-2">{numInput("vale_transporte")}</td>
+      <td className="px-2 py-2">{numInput("vale_refeicao")}</td>
       <td className="px-2 py-2">{numInput("horas_extras")}</td>
       <td className="px-2 py-2">{numInput("ajuda_custo")}</td>
       <td className="px-2 py-2">{numInput("outros_proventos")}</td>
@@ -2396,13 +2443,13 @@ function FolhaPagamentoView({ employees, payrollEntries, payrollPayments, accoun
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
-                {["Funcionário", "Salário", "Adiant.", "Vale merc.", "H. extras", "Ajuda custo", "Outros", "Descontos", "Total", "Pago", "Pendente", "Status", ""].map((h) => (
+                {["Funcionário", "Salário", "Adiant.", "Vale merc.", "Vale transp.", "Vale refeição", "H. extras", "Ajuda custo", "Outros", "Descontos", "Total", "Pago", "Pendente", "Status", ""].map((h) => (
                   <th key={h} className="text-left px-2 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {entriesDoMes.length === 0 && <tr><td colSpan={13}><EmptyState text="Nenhum funcionário ativo nesta competência." /></td></tr>}
+              {entriesDoMes.length === 0 && <tr><td colSpan={15}><EmptyState text="Nenhum funcionário ativo nesta competência." /></td></tr>}
               {entriesDoMes.map((entry) => (
                 <FolhaRow key={entry.id} entry={entry} funcionario={ativos.find((f) => f.id === entry.funcionario_id)}
                   pagamentos={payrollPayments} accounts={accounts.filter((a) => a.active)} canManage={canManage}
@@ -2438,7 +2485,7 @@ function NovaHoraExtraModal({ employees, onClose, onSave }) {
   const funcionario = employees.find((f) => f.id === funcionarioId);
   const horas = parseValorBR(quantidadeHoras) || 0;
   const perc = parseValorBR(percentual) || 0;
-  const valorHoraNormal = funcionario ? funcionario.salario_base / 220 : 0;
+  const valorHoraNormal = funcionario ? (funcionario.tipo_contrato === "Intermitente" ? (funcionario.valor_hora || 0) : funcionario.salario_base / 220) : 0;
   const valorCalculado = valorHoraNormal * (1 + perc / 100) * horas;
 
   const submit = async () => {
@@ -3051,7 +3098,7 @@ export default function App() {
       setRecurringExpenses(recurringRows || []);
       setPendingEdits(pendingEditsRows || []);
       setEmployees(employeeRows || []);
-      setPayrollEntries((payrollRows || []).map((p) => ({ ...p, salario: Number(p.salario), adiantamento: Number(p.adiantamento), vale_mercado: Number(p.vale_mercado), horas_extras: Number(p.horas_extras), ajuda_custo: Number(p.ajuda_custo), outros_proventos: Number(p.outros_proventos), descontos: Number(p.descontos) })));
+      setPayrollEntries((payrollRows || []).map((p) => ({ ...p, salario: Number(p.salario), adiantamento: Number(p.adiantamento), vale_mercado: Number(p.vale_mercado), vale_transporte: Number(p.vale_transporte), vale_refeicao: Number(p.vale_refeicao), horas_extras: Number(p.horas_extras), ajuda_custo: Number(p.ajuda_custo), outros_proventos: Number(p.outros_proventos), descontos: Number(p.descontos) })));
       setPayrollPayments((payrollPaymentRows || []).map((p) => ({ ...p, valor_pago: Number(p.valor_pago) })));
       setOvertimeEntries((overtimeRows || []).map((o) => ({ ...o, quantidade_horas: Number(o.quantidade_horas), percentual: Number(o.percentual), valor_calculado: Number(o.valor_calculado) })));
       setHrDocumentTypes(hrDocTypeRows || []);
@@ -3310,11 +3357,15 @@ export default function App() {
     const jaExistem = new Set(payrollEntries.filter((p) => p.competencia === competencia).map((p) => p.funcionario_id));
     const faltando = ativos.filter((f) => !jaExistem.has(f.id));
     if (faltando.length === 0) return;
-    const novasLinhas = faltando.map((f) => ({
-      funcionario_id: f.id, competencia, salario: f.salario_base, adiantamento: 0, vale_mercado: 0,
-      horas_extras: 0, ajuda_custo: 0, outros_proventos: 0, descontos: 0,
-      data_prevista_pagamento: competencia, created_by: currentUser.id,
-    }));
+    const novasLinhas = faltando.map((f) => {
+      const adicional = f.periculosidade_insalubridade ? (f.valor_adicional || 0) : 0;
+      return {
+        funcionario_id: f.id, competencia, salario: f.salario_base, adiantamento: 0, vale_mercado: 0,
+        vale_transporte: 0, vale_refeicao: 0, horas_extras: 0, ajuda_custo: 0, outros_proventos: adicional, descontos: 0,
+        observacoes: adicional > 0 ? `Inclui ${f.periculosidade_insalubridade} (R$ ${adicional.toFixed(2).replace(".", ",")})` : null,
+        data_prevista_pagamento: competencia, created_by: currentUser.id,
+      };
+    });
     const { error } = await supabase.from("payroll_entries").insert(novasLinhas);
     if (error) setErrorBanner("Não consegui carregar a folha do mês: " + error.message);
   };
