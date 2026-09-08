@@ -737,14 +737,18 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         const notasVencendo = (contasReceber || []).filter((n) => n.status !== "recebido" && (n.data_prevista_recebimento || "") <= limite);
         const total = despesasVencendo.length + notasVencendo.length;
         if (total === 0) return null;
+        let texto;
+        if (despesasVencendo.length > 0 && notasVencendo.length > 0) {
+          texto = `${total} contas vencendo ou já vencidas nos próximos 7 dias — ${despesasVencendo.length} a pagar · ${notasVencendo.length} a receber`;
+        } else if (despesasVencendo.length > 0) {
+          texto = `${despesasVencendo.length} despesa${despesasVencendo.length > 1 ? "s" : ""} a pagar vencendo ou já vencida${despesasVencendo.length > 1 ? "s" : ""} nos próximos 7 dias`;
+        } else {
+          texto = `${notasVencendo.length} nota${notasVencendo.length > 1 ? "s" : ""} a receber vencendo ou já vencida${notasVencendo.length > 1 ? "s" : ""} nos próximos 7 dias`;
+        }
         return (
           <Card style={{ background: "var(--amber-soft)", border: "none" }} className="flex items-center gap-2">
             <AlertCircle size={18} style={{ color: "var(--amber)" }} />
-            <p className="text-sm">
-              ⏰ <b>{total} conta{total > 1 ? "s" : ""}</b> vencendo ou já vencida{total > 1 ? "s" : ""} nos próximos 7 dias
-              {despesasVencendo.length > 0 && ` — ${despesasVencendo.length} a pagar`}
-              {notasVencendo.length > 0 && ` — ${notasVencendo.length} a receber`}
-            </p>
+            <p className="text-sm">{texto}</p>
           </Card>
         );
       })()}
