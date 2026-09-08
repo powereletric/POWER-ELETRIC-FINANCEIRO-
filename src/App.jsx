@@ -27,6 +27,22 @@ const ROLES = {
 };
 
 const fmtBRL = (v) => (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+// Aceita valor digitado como 1500,50 ou 1500.50 ou 1.500,50 (ponto de milhar + vírgula decimal)
+function parseValorBR(str) {
+  let s = String(str ?? "").trim();
+  if (!s) return NaN;
+  const temVirgula = s.includes(",");
+  const temPonto = s.includes(".");
+  if (temVirgula && temPonto) {
+    // ponto = separador de milhar, vírgula = decimal (ex: 1.500,50)
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (temVirgula) {
+    // só vírgula → é o decimal (ex: 1500,50)
+    s = s.replace(",", ".");
+  }
+  // só ponto, ou nenhum dos dois → já está em formato válido pro parseFloat (ex: 1500.50)
+  return parseFloat(s);
+}
 const todayISO = () => new Date().toISOString().slice(0, 10);
 // Novo início oficial do controle financeiro — julho/agosto ficam como histórico, não somem, só saem da visão padrão
 const CORTE_HISTORICO = "2026-09-01";
@@ -310,7 +326,7 @@ function TransactionModal({ initialType, accounts, categories, currentUser, onCl
   };
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     if (!v || v <= 0) { setErr("Informe um valor válido maior que zero."); return; }
     if (!date) { setErr("Informe a data."); return; }
     if (type === "transferencia" && conta === contaDestino) { setErr("A conta de origem e destino devem ser diferentes."); return; }
@@ -421,7 +437,7 @@ function EditTransactionModal({ tx, accounts, categories, currentUser, onClose, 
   const isTransfer = tx.type === "transferencia";
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     if (!v || v <= 0) { setErr("Informe um valor válido maior que zero."); return; }
     if (!date) { setErr("Informe a data."); return; }
     setSaving(true);
@@ -485,7 +501,7 @@ function BaixaAdiantamentoModal({ adiantamento, categories, accounts, currentUse
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (v > adiantamento.saldoAPrestar + 0.009) { setErr(`O saldo disponível com ${adiantamento.pessoa} é de ${fmtBRL(adiantamento.saldoAPrestar)}.`); return; }
     setSaving(true);
@@ -527,7 +543,7 @@ function DevolucaoAdiantamentoModal({ adiantamento, accounts, currentUser, onClo
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (v > adiantamento.saldoAPrestar + 0.009) { setErr("Valor maior que o saldo disponível."); return; }
     setSaving(true);
@@ -560,7 +576,7 @@ function PagamentoReembolsoModal({ reembolso, accounts, currentUser, onClose, on
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (v > reembolso.restante + 0.009) { setErr("Valor maior que o restante a pagar."); return; }
     setSaving(true);
@@ -600,7 +616,7 @@ function PagamentoEmprestimoModal({ emprestimo, accounts, currentUser, onClose, 
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (v > emprestimo.saldoDevedor + 0.009) { setErr("Valor maior que o saldo devedor."); return; }
     setSaving(true);
@@ -1069,7 +1085,7 @@ function ContasView({ accounts, engine, onAdd, onToggleActive, canManage }) {
   const submit = async () => {
     if (!name.trim()) return;
     setSaving(true);
-    await onAdd({ name: name.trim(), active: true, saldoInicial: parseFloat(String(saldoInicial).replace(",", ".")) || 0 });
+    await onAdd({ name: name.trim(), active: true, saldoInicial: parseValorBR(saldoInicial) || 0 });
     setSaving(false);
     setName(""); setSaldoInicial("0");
   };
@@ -1345,7 +1361,7 @@ function NovaDespesaPrevistaModal({ categories, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     if (!descricao.trim()) { setErr("Informe a descrição."); return; }
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (!dataVencimento) { setErr("Informe a data de vencimento."); return; }
@@ -1373,6 +1389,44 @@ function NovaDespesaPrevistaModal({ categories, onClose, onSave }) {
   );
 }
 
+function EditDespesaPrevistaModal({ despesa, categories, onClose, onSave }) {
+  const [descricao, setDescricao] = useState(despesa.descricao || "");
+  const [categoria, setCategoria] = useState(despesa.categoria || categories[0]?.name || "");
+  const [valor, setValor] = useState(String(despesa.valor_previsto ?? "").replace(".", ","));
+  const [dataVencimento, setDataVencimento] = useState(despesa.data_vencimento || todayISO());
+  const [pessoa, setPessoa] = useState(despesa.pessoa || "");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    const v = parseValorBR(valor);
+    if (!descricao.trim()) { setErr("Informe a descrição."); return; }
+    if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
+    if (!dataVencimento) { setErr("Informe a data de vencimento."); return; }
+    setSaving(true);
+    const ok = await onSave(despesa, { descricao: descricao.trim(), categoria, valor_previsto: v, data_vencimento: dataVencimento, pessoa: pessoa.trim() });
+    setSaving(false);
+    if (!ok) setErr("Não consegui salvar. Tente novamente.");
+  };
+
+  return (
+    <Modal title="Editar despesa prevista" onClose={onClose}>
+      <Field label="Descrição" required><TextInput value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex: Aluguel de setembro" /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Valor previsto (R$)" required><TextInput inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></Field>
+        <Field label="Vencimento" required><TextInput type="date" value={dataVencimento} onChange={(e) => setDataVencimento(e.target.value)} /></Field>
+      </div>
+      <Field label="Categoria"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</Select></Field>
+      <Field label="Pessoa / fornecedor"><TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} /></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Salvando..." : "Salvar alterações"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function MarcarPagaModal({ despesa, accounts, onClose, onSave }) {
   const [dataPagamento, setDataPagamento] = useState(todayISO());
   const [valorPago, setValorPago] = useState(String(despesa.valor_previsto).replace(".", ","));
@@ -1381,7 +1435,7 @@ function MarcarPagaModal({ despesa, accounts, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valorPago).replace(",", "."));
+    const v = parseValorBR(valorPago);
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (!conta) { setErr("Selecione a conta."); return; }
     setSaving(true);
@@ -1407,7 +1461,7 @@ function MarcarPagaModal({ despesa, accounts, onClose, onSave }) {
   );
 }
 
-function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canManage, onAdd, onMarcarPaga }) {
+function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canManage, onAdd, onMarcarPaga, onEditDespesa }) {
   const [modal, setModal] = useState(null);
   const [filtroMes, setFiltroMes] = useState(todayISO().slice(0, 7));
   const comStatus = despesasPrevistas.map((d) => ({ ...d, statusCalc: despesaPrevistaStatus(d) }));
@@ -1461,6 +1515,7 @@ function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canMan
                   </div>
                   <div className="flex items-center gap-3">
                     <Money v={d.valor_previsto} size="sm" tone="neg" />
+                    {canManage && <Btn variant="ghost" onClick={() => setModal({ kind: "editar", despesa: d })}>Editar</Btn>}
                     {canManage && <Btn variant="gold" onClick={() => setModal({ kind: "pagar", despesa: d })}>Marcar como paga</Btn>}
                   </div>
                 </div>
@@ -1485,6 +1540,7 @@ function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canMan
       )}
 
       {modal?.kind === "nova" && <NovaDespesaPrevistaModal categories={categories.filter((c) => c.active)} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "editar" && <EditDespesaPrevistaModal despesa={modal.despesa} categories={categories.filter((c) => c.active)} onClose={() => setModal(null)} onSave={async (d, p) => { const ok = await onEditDespesa(d, p); if (ok) setModal(null); return ok; }} />}
       {modal?.kind === "pagar" && <MarcarPagaModal despesa={modal.despesa} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (d, p) => { const ok = await onMarcarPaga(d, p); if (ok) setModal(null); return ok; }} />}
     </div>
   );
@@ -1511,7 +1567,7 @@ function NovaNotaModal({ accounts, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     if (!cliente.trim()) { setErr("Informe o cliente."); return; }
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (!dataPrevista) { setErr("Informe a data prevista de recebimento."); return; }
@@ -1546,6 +1602,52 @@ function NovaNotaModal({ accounts, onClose, onSave }) {
   );
 }
 
+function EditNotaModal({ nota, accounts, onClose, onSave }) {
+  const [cliente, setCliente] = useState(nota.cliente || "");
+  const [numeroNf, setNumeroNf] = useState(nota.numero_nf || "");
+  const [valor, setValor] = useState(String(nota.valor ?? "").replace(".", ","));
+  const [dataEmissao, setDataEmissao] = useState(nota.data_emissao_nf || todayISO());
+  const [dataPrevista, setDataPrevista] = useState(nota.data_prevista_recebimento || todayISO());
+  const [conta, setConta] = useState(nota.conta_recebimento_id || accounts[0]?.id || "");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    const v = parseValorBR(valor);
+    if (!cliente.trim()) { setErr("Informe o cliente."); return; }
+    if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
+    if (!dataPrevista) { setErr("Informe a data prevista de recebimento."); return; }
+    setSaving(true);
+    const ok = await onSave(nota, {
+      cliente: cliente.trim(), numero_nf: numeroNf.trim(), valor: v,
+      data_emissao_nf: dataEmissao, data_prevista_recebimento: dataPrevista,
+      conta_recebimento_id: conta || null,
+    });
+    setSaving(false);
+    if (!ok) setErr("Não consegui salvar. Tente novamente.");
+  };
+
+  return (
+    <Modal title="Editar nota a receber" onClose={onClose}>
+      <Field label="Cliente" required><TextInput value={cliente} onChange={(e) => setCliente(e.target.value)} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Valor da nota (R$)" required><TextInput inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></Field>
+        <Field label="Nº da NF"><TextInput value={numeroNf} onChange={(e) => setNumeroNf(e.target.value)} /></Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Data emitida"><TextInput type="date" value={dataEmissao} onChange={(e) => setDataEmissao(e.target.value)} /></Field>
+        <Field label="Data prevista" required><TextInput type="date" value={dataPrevista} onChange={(e) => setDataPrevista(e.target.value)} /></Field>
+      </div>
+      <Field label="Conta prevista para o recebimento"><Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Salvando..." : "Salvar alterações"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function MarcarRecebidoModal({ nota, accounts, onClose, onSave }) {
   const [dataRecebimento, setDataRecebimento] = useState(todayISO());
   const [valorRecebido, setValorRecebido] = useState(String(nota.valor).replace(".", ","));
@@ -1554,8 +1656,8 @@ function MarcarRecebidoModal({ nota, accounts, onClose, onSave }) {
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const vRecebido = parseFloat(String(valorRecebido).replace(",", ".")) || 0;
-  const vBloqueado = parseFloat(String(valorBloqueado).replace(",", ".")) || 0;
+  const vRecebido = parseValorBR(valorRecebido) || 0;
+  const vBloqueado = parseValorBR(valorBloqueado) || 0;
   const vDisponivel = vRecebido - vBloqueado;
 
   const submit = async () => {
@@ -1603,7 +1705,7 @@ function LiberarBloqueioModal({ nota, accounts, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (v > bloqueadoAtual + 0.009) { setErr(`Só há ${fmtBRL(bloqueadoAtual)} bloqueado.`); return; }
     setSaving(true);
@@ -1631,7 +1733,7 @@ function LiberarBloqueioModal({ nota, accounts, onClose, onSave }) {
 const MES_NOMES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 const fmtMesAno = (ym) => { const [y, m] = ym.split("-"); return `${MES_NOMES[parseInt(m, 10) - 1]} ${y}`; };
 
-function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcarRecebido, onLiberarBloqueio }) {
+function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcarRecebido, onLiberarBloqueio, onEditNota }) {
   const [modal, setModal] = useState(null);
   const [filtroMes, setFiltroMes] = useState(todayISO().slice(0, 7));
 
@@ -1700,6 +1802,7 @@ function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcar
                   </div>
                   <div className="flex items-center gap-3">
                     <Money v={n.valor} size="sm" tone="pos" />
+                    {canManage && <Btn variant="ghost" onClick={() => setModal({ kind: "editar", nota: n })}>Editar</Btn>}
                     {canManage && <Btn variant="gold" onClick={() => setModal({ kind: "receber", nota: n })}>Marcar recebido</Btn>}
                   </div>
                 </div>
@@ -1730,6 +1833,7 @@ function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcar
       )}
 
       {modal?.kind === "nova" && <NovaNotaModal accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (n) => { const ok = await onAdd(n); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "editar" && <EditNotaModal nota={modal.nota} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (n, p) => { const ok = await onEditNota(n, p); if (ok) setModal(null); return ok; }} />}
       {modal?.kind === "receber" && <MarcarRecebidoModal nota={modal.nota} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (n, p) => { const ok = await onMarcarRecebido(n, p); if (ok) setModal(null); return ok; }} />}
       {modal?.kind === "liberar" && <LiberarBloqueioModal nota={modal.nota} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (n, p) => { const ok = await onLiberarBloqueio(n, p); if (ok) setModal(null); return ok; }} />}
     </div>
@@ -1754,7 +1858,7 @@ function NovaDespesaFixaModal({ categories, accounts, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valor).replace(",", "."));
+    const v = parseValorBR(valor);
     const dia = parseInt(diaVencimento, 10);
     if (!descricao.trim()) { setErr("Informe a descrição."); return; }
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
@@ -1981,14 +2085,14 @@ function NovoFuncionarioModal({ onClose, onSave, editing }) {
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const sal = parseFloat(String(salarioBase).replace(",", "."));
+    const sal = parseValorBR(salarioBase);
     if (!nome.trim()) { setErr("Informe o nome."); return; }
     if (!sal || sal <= 0) { setErr("Informe um salário-base válido."); return; }
     setSaving(true);
     const ok = await onSave({
       nome: nome.trim(), cargo: cargo.trim(), tipo_contrato: tipoContrato, salario_base: sal,
       periculosidade_insalubridade: periculosidade || null,
-      valor_adicional: parseFloat(String(valorAdicional).replace(",", ".")) || 0,
+      valor_adicional: parseValorBR(valorAdicional) || 0,
       unidade: unidade.trim(), data_admissao: dataAdmissao, observacoes: observacoes.trim(), status: "ativo",
     });
     setSaving(false);
@@ -2103,7 +2207,7 @@ function RegistrarPagamentoFolhaModal({ entry, funcionario, pendente, accounts, 
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valorPago).replace(",", "."));
+    const v = parseValorBR(valorPago);
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (!conta) { setErr("Selecione a conta."); return; }
     setSaving(true);
@@ -2142,7 +2246,7 @@ function FolhaRow({ entry, funcionario, pagamentos, accounts, canManage, onUpdat
   const meta = PAYROLL_STATUS_META[status];
 
   const commit = (field) => {
-    const v = parseFloat(String(local[field]).toString().replace(",", ".")) || 0;
+    const v = parseValorBR(local[field]) || 0;
     if (v !== entry[field]) onUpdateField(entry, field, v);
   };
   const numInput = (field, w = 90) => (
@@ -2249,8 +2353,8 @@ function NovaHoraExtraModal({ employees, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
 
   const funcionario = employees.find((f) => f.id === funcionarioId);
-  const horas = parseFloat(String(quantidadeHoras).replace(",", ".")) || 0;
-  const perc = parseFloat(String(percentual).replace(",", ".")) || 0;
+  const horas = parseValorBR(quantidadeHoras) || 0;
+  const perc = parseValorBR(percentual) || 0;
   const valorHoraNormal = funcionario ? funcionario.salario_base / 220 : 0;
   const valorCalculado = valorHoraNormal * (1 + perc / 100) * horas;
 
@@ -2478,7 +2582,7 @@ function NovoAcordoModal({ employees, onClose, onSave }) {
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const total = parseFloat(String(valorTotal).replace(",", ".")) || 0;
+  const total = parseValorBR(valorTotal) || 0;
   const qtd = parseInt(qtdParcelas, 10) || 1;
   const valorParcela = qtd > 0 ? total / qtd : 0;
 
@@ -2534,7 +2638,7 @@ function RegistrarPagamentoParcelaModal({ parcela, acordo, funcionario, accounts
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    const v = parseFloat(String(valorPago).replace(",", "."));
+    const v = parseValorBR(valorPago);
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (!conta) { setErr("Selecione a conta."); return; }
     setSaving(true);
@@ -2999,6 +3103,11 @@ export default function App() {
     if (error) { setErrorBanner("Não consegui salvar a previsão: " + error.message); return false; }
     setErrorBanner(""); return true;
   };
+  const editDespesaPrevista = async (despesa, updated) => {
+    const { error } = await supabase.from("despesas_previstas").update(updated).eq("id", despesa.id);
+    if (error) { setErrorBanner("Não consegui salvar a edição: " + error.message); return false; }
+    setErrorBanner(""); return true;
+  };
   const marcarDespesaComoPaga = async (despesa, { dataPagamento, valorPago, conta }) => {
     // cria a despesa real (mesma estrutura de sempre) e liga à previsão — não duplica se já foi marcada
     const { data: txRow, error: txErr } = await supabase.from("transactions").insert(toDb({
@@ -3019,6 +3128,11 @@ export default function App() {
   const addContaReceber = async (n) => {
     const { error } = await supabase.from("revenue_forecast").insert({ ...n, created_by: currentUser.id });
     if (error) { setErrorBanner("Não consegui salvar a nota: " + error.message); return false; }
+    setErrorBanner(""); return true;
+  };
+  const editContaReceber = async (nota, updated) => {
+    const { error } = await supabase.from("revenue_forecast").update(updated).eq("id", nota.id);
+    if (error) { setErrorBanner("Não consegui salvar a edição: " + error.message); return false; }
     setErrorBanner(""); return true;
   };
   const marcarContaComoRecebida = async (nota, { dataRecebimento, valorRecebido, valorBloqueado, conta }) => {
@@ -3277,8 +3391,8 @@ export default function App() {
           {tab === "despesas-fixas" && <DespesasFixasView recurringExpenses={recurringExpenses} transactions={transactions} accounts={accounts} categories={categories} canManage={role.canLancar} onAdd={addRecurringExpense} onToggleAtivo={toggleRecurringExpenseAtivo} onDarBaixa={darBaixaRecorrente} />}
           {tab === "cartao" && <CartaoView transactions={transactions} accounts={accounts} />}
           {tab === "aprovacoes" && <AprovacoesView pendingEdits={pendingEdits} transactions={transactions} isAdmin={role.isAdmin} onApprove={approvePendingEdit} onReject={rejectPendingEdit} />}
-          {tab === "despesas-previstas" && <DespesasPrevistasView despesasPrevistas={despesasPrevistas} accounts={accounts} categories={categories} canManage={role.canLancar} onAdd={addDespesaPrevista} onMarcarPaga={marcarDespesaComoPaga} />}
-          {tab === "contas-receber" && <ContasReceberView contasReceber={contasReceber} accounts={accounts} canManage={role.canLancar} onAdd={addContaReceber} onMarcarRecebido={marcarContaComoRecebida} onLiberarBloqueio={liberarBloqueio} />}
+          {tab === "despesas-previstas" && <DespesasPrevistasView despesasPrevistas={despesasPrevistas} accounts={accounts} categories={categories} canManage={role.canLancar} onAdd={addDespesaPrevista} onMarcarPaga={marcarDespesaComoPaga} onEditDespesa={editDespesaPrevista} />}
+          {tab === "contas-receber" && <ContasReceberView contasReceber={contasReceber} accounts={accounts} canManage={role.canLancar} onAdd={addContaReceber} onMarcarRecebido={marcarContaComoRecebida} onLiberarBloqueio={liberarBloqueio} onEditNota={editContaReceber} />}
           {tab === "contas" && <ContasView accounts={accounts} engine={engine} onAdd={addAccount} onToggleActive={toggleAccountActive} canManage={role.canManageConfig} />}
           {tab === "categorias" && <CategoriasView categories={categories} onAdd={addCategory} onToggleActive={toggleCategoryActive} onUpdateEmoji={updateCategoryEmoji} canManage={role.canManageConfig} />}
           {tab === "relatorios" && <RelatoriosView transactions={transactions} accounts={accounts} engine={engine} />}
