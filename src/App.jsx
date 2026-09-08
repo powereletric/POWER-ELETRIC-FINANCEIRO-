@@ -3821,7 +3821,7 @@ export default function App() {
           <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold" style={{ background: "var(--gold-soft)", color: "var(--gold)" }}>{currentUser.name.slice(0, 2).toUpperCase()}</div>
         </div>
 
-        <div className={`p-4 md:p-7 mx-auto ${tab === "fluxo" ? "max-w-full" : "max-w-6xl"}`}>
+        <div className={`p-4 md:p-7 mx-auto ${["fluxo", "folha", "pagamentos-abertos"].includes(tab) ? "max-w-full" : "max-w-6xl"}`}>
           <div className="hidden md:flex items-center justify-between mb-6">
             <h1 className="fin-display text-2xl font-semibold">{navItems.find((n) => n.key === tab)?.label}</h1>
             {role.canLancar && <Btn variant="gold" icon={Plus} onClick={() => openQuick("despesa")}>Novo lançamento</Btn>}
