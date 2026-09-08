@@ -2153,6 +2153,12 @@ function AprovacoesView({ pendingEdits, transactions, isAdmin, onApprove, onReje
    RH — FUNCIONÁRIOS
    ============================================================ */
 const CONTRATO_OPCOES = ["CLT", "PJ", "Temporário", "Intermitente", "Estagiário", "Outro"];
+const EMPLOYEE_STATUS_META = {
+  ativo: { label: "Ativo", tone: "green" },
+  afastado: { label: "Afastado", tone: "amber" },
+  esperando_acordo: { label: "Esperando acordo", tone: "teal" },
+  inativo: { label: "Inativo", tone: "neutral" },
+};
 // Calcula o valor do adicional de periculosidade/insalubridade — pode ser um valor fixo (R$) ou um percentual do salário-base
 function calcAdicionalPericulosidade(f) {
   if (!f.periculosidade_insalubridade) return 0;
@@ -2264,11 +2270,11 @@ function NovoFuncionarioModal({ onClose, onSave, editing }) {
   );
 }
 
-function FuncionariosView({ employees, canManage, onAdd, onEdit, onToggleStatus }) {
+function FuncionariosView({ employees, canManage, onAdd, onEdit, onChangeStatus }) {
   const [q, setQ] = useState("");
   const [modal, setModal] = useState(null);
   const ativos = employees.filter((e) => e.status === "ativo");
-  const inativos = employees.filter((e) => e.status === "inativo");
+  const outros = employees.filter((e) => e.status !== "ativo");
   const filtro = (list) => list.filter((e) => !q.trim() || `${e.nome} ${e.cargo}`.toLowerCase().includes(q.toLowerCase()));
 
   return (
@@ -2308,7 +2314,9 @@ function FuncionariosView({ employees, canManage, onAdd, onEdit, onToggleStatus 
                 {canManage && (
                   <>
                     <Btn variant="ghost" onClick={() => setModal({ kind: "editar", employee: f })}>Editar</Btn>
-                    <Btn variant="ghost" onClick={() => onToggleStatus(f)}>Desativar</Btn>
+                    <Select value={f.status} onChange={(e) => onChangeStatus(f, e.target.value)} style={{ width: 170 }}>
+                      {Object.entries(EMPLOYEE_STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    </Select>
                   </>
                 )}
               </div>
@@ -2316,14 +2324,18 @@ function FuncionariosView({ employees, canManage, onAdd, onEdit, onToggleStatus 
           );
         })}
       </Card>
-      {inativos.length > 0 && (
+      {outros.length > 0 && (
         <div>
-          <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Inativos</p>
+          <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Afastados, esperando acordo ou inativos</p>
           <Card className="p-0 overflow-hidden">
-            {filtro(inativos).map((f, i) => (
-              <div key={f.id} className="flex items-center justify-between px-4 py-2.5 text-sm" style={{ borderTop: i ? "1px solid var(--line)" : "none", opacity: 0.7 }}>
-                <span>{f.nome}</span>
-                {canManage && <Btn variant="ghost" onClick={() => onToggleStatus(f)}>Reativar</Btn>}
+            {filtro(outros).map((f, i) => (
+              <div key={f.id} className="flex items-center justify-between px-4 py-2.5 text-sm" style={{ borderTop: i ? "1px solid var(--line)" : "none", opacity: 0.8 }}>
+                <span>{f.nome} <Pill tone={EMPLOYEE_STATUS_META[f.status]?.tone || "neutral"}>{EMPLOYEE_STATUS_META[f.status]?.label || f.status}</Pill></span>
+                {canManage && (
+                  <Select value={f.status} onChange={(e) => onChangeStatus(f, e.target.value)} style={{ width: 170 }}>
+                    {Object.entries(EMPLOYEE_STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </Select>
+                )}
               </div>
             ))}
           </Card>
@@ -2889,7 +2901,7 @@ function AcordosView({ agreements, installments, employees, accounts, canManage,
           </div>
         </div>
       )}
-      {modal?.kind === "novo" && <NovoAcordoModal employees={employees.filter((e) => e.status === "ativo")} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "novo" && <NovoAcordoModal employees={employees.filter((e) => e.status === "ativo" || e.status === "esperando_acordo")} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
       {modal?.kind === "pagar" && <RegistrarPagamentoParcelaModal parcela={modal.parcela} acordo={modal.acordo} funcionario={employees.find((e) => e.id === modal.acordo.funcionario_id)} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (p, a, dados) => { const ok = await onPagar(p, a, dados); if (ok) setModal(null); return ok; }} />}
     </div>
   );
@@ -3374,8 +3386,8 @@ export default function App() {
     if (error) { setErrorBanner("Não consegui salvar: " + error.message); return false; }
     setErrorBanner(""); return true;
   };
-  const toggleEmployeeStatus = async (e) => {
-    const { error } = await supabase.from("employees").update({ status: e.status === "ativo" ? "inativo" : "ativo" }).eq("id", e.id);
+  const changeEmployeeStatus = async (e, novoStatus) => {
+    const { error } = await supabase.from("employees").update({ status: novoStatus }).eq("id", e.id);
     if (error) setErrorBanner("Não consegui atualizar: " + error.message);
   };
 
@@ -3569,7 +3581,7 @@ export default function App() {
           {tab === "contas" && <ContasView accounts={accounts} engine={engine} onAdd={addAccount} onToggleActive={toggleAccountActive} canManage={role.canManageConfig} />}
           {tab === "categorias" && <CategoriasView categories={categories} onAdd={addCategory} onToggleActive={toggleCategoryActive} onUpdateEmoji={updateCategoryEmoji} canManage={role.canManageConfig} />}
           {tab === "relatorios" && <RelatoriosView transactions={transactions} accounts={accounts} engine={engine} />}
-          {tab === "funcionarios" && <FuncionariosView employees={employees} canManage={role.canLancar} onAdd={addEmployee} onEdit={editEmployee} onToggleStatus={toggleEmployeeStatus} />}
+          {tab === "funcionarios" && <FuncionariosView employees={employees} canManage={role.canLancar} onAdd={addEmployee} onEdit={editEmployee} onChangeStatus={changeEmployeeStatus} />}
           {tab === "folha" && <FolhaPagamentoView employees={employees} payrollEntries={payrollEntries} payrollPayments={payrollPayments} accounts={accounts} canManage={role.canLancar} onEnsureEntries={ensurePayrollEntries} onUpdateField={updatePayrollField} onPagar={registrarPagamentoFolha} />}
           {tab === "horas-extras" && <HorasExtrasView overtimeEntries={overtimeEntries} employees={employees} canManage={role.canLancar} onAdd={addOvertimeEntry} />}
           {tab === "documentos-rh" && <DocumentosView documentos={hrDocuments} tipos={hrDocumentTypes} employees={employees} canManage={role.canLancar} onAdd={addHrDocument} onAddTipo={addHrDocumentType} />}
