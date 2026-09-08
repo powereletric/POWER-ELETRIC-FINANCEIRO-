@@ -2153,6 +2153,13 @@ function AprovacoesView({ pendingEdits, transactions, isAdmin, onApprove, onReje
    RH — FUNCIONÁRIOS
    ============================================================ */
 const CONTRATO_OPCOES = ["CLT", "PJ", "Temporário", "Intermitente", "Estagiário", "Outro"];
+// Calcula o valor do adicional de periculosidade/insalubridade — pode ser um valor fixo (R$) ou um percentual do salário-base
+function calcAdicionalPericulosidade(f) {
+  if (!f.periculosidade_insalubridade) return 0;
+  const v = f.valor_adicional || 0;
+  if (f.adicional_tipo === "percentual") return (f.salario_base || 0) * (v / 100);
+  return v;
+}
 
 function NovoFuncionarioModal({ onClose, onSave, editing }) {
   const [nome, setNome] = useState(editing?.nome || "");
@@ -2162,6 +2169,7 @@ function NovoFuncionarioModal({ onClose, onSave, editing }) {
   const [salarioBase, setSalarioBase] = useState(editing ? String(editing.salario_base).replace(".", ",") : "");
   const [valorHora, setValorHora] = useState(editing?.valor_hora ? String(editing.valor_hora).replace(".", ",") : "");
   const [periculosidade, setPericulosidade] = useState(editing?.periculosidade_insalubridade || "");
+  const [adicionalTipo, setAdicionalTipo] = useState(editing?.adicional_tipo || "fixo");
   const [valorAdicional, setValorAdicional] = useState(editing?.valor_adicional ? String(editing.valor_adicional).replace(".", ",") : "");
   const [unidade, setUnidade] = useState(editing?.unidade || "");
   const [dataAdmissao, setDataAdmissao] = useState(editing?.data_admissao || todayISO());
@@ -2182,6 +2190,7 @@ function NovoFuncionarioModal({ onClose, onSave, editing }) {
       nome: nome.trim(), empresa, cargo: cargo.trim(), tipo_contrato: tipoContrato,
       salario_base: sal, valor_hora: hora || null,
       periculosidade_insalubridade: periculosidade || null,
+      adicional_tipo: adicionalTipo,
       valor_adicional: parseValorBR(valorAdicional) || 0,
       unidade: unidade.trim(), data_admissao: dataAdmissao, observacoes: observacoes.trim(), status: "ativo",
     });
@@ -2224,8 +2233,26 @@ function NovoFuncionarioModal({ onClose, onSave, editing }) {
             <option value="">Nenhum</option><option value="periculosidade">Periculosidade</option><option value="insalubridade">Insalubridade</option>
           </Select>
         </Field>
-        <Field label="Valor/percentual do adicional (R$)"><TextInput inputMode="decimal" value={valorAdicional} onChange={(e) => setValorAdicional(e.target.value)} placeholder="0,00" /></Field>
+        <Field label="Tipo do adicional">
+          <Select value={adicionalTipo} onChange={(e) => setAdicionalTipo(e.target.value)}>
+            <option value="fixo">Valor fixo (R$)</option>
+            <option value="percentual">Percentual do salário (%)</option>
+          </Select>
+        </Field>
       </div>
+      <Field label={adicionalTipo === "percentual" ? "Percentual (%)" : "Valor do adicional (R$)"}>
+        <TextInput inputMode="decimal" value={valorAdicional} onChange={(e) => setValorAdicional(e.target.value)} placeholder={adicionalTipo === "percentual" ? "Ex: 30" : "0,00"} />
+      </Field>
+      {periculosidade && valorAdicional && (
+        <Card className="mb-3" style={{ background: "var(--amber-soft)", border: "none" }}>
+          <p className="text-xs">
+            {adicionalTipo === "percentual"
+              ? `${parseValorBR(valorAdicional) || 0}% de ${fmtBRL(parseValorBR(salarioBase) || 0)} = `
+              : "Valor fixo: "}
+            <b>{fmtBRL(adicionalTipo === "percentual" ? (parseValorBR(salarioBase) || 0) * ((parseValorBR(valorAdicional) || 0) / 100) : (parseValorBR(valorAdicional) || 0))}</b> por mês
+          </p>
+        </Card>
+      )}
       <Field label="Unidade/local de trabalho"><TextInput value={unidade} onChange={(e) => setUnidade(e.target.value)} /></Field>
       <Field label="Observações"><TextInput value={observacoes} onChange={(e) => setObservacoes(e.target.value)} /></Field>
       {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
@@ -2253,7 +2280,7 @@ function FuncionariosView({ employees, canManage, onAdd, onEdit, onToggleStatus 
       <Card className="p-0 overflow-hidden">
         {filtro(ativos).length === 0 ? <div className="p-4"><EmptyState text="Nenhum funcionário ativo encontrado." /></div> : filtro(ativos).map((f, i) => {
           const isIntermitente = f.tipo_contrato === "Intermitente";
-          const adicional = f.periculosidade_insalubridade ? (f.valor_adicional || 0) : 0;
+          const adicional = calcAdicionalPericulosidade(f);
           const totalComAdicional = f.salario_base + adicional;
           const valorHora = isIntermitente ? (f.valor_hora || 0) : f.salario_base / 220;
           return (
@@ -3358,7 +3385,7 @@ export default function App() {
     const faltando = ativos.filter((f) => !jaExistem.has(f.id));
     if (faltando.length === 0) return;
     const novasLinhas = faltando.map((f) => {
-      const adicional = f.periculosidade_insalubridade ? (f.valor_adicional || 0) : 0;
+      const adicional = calcAdicionalPericulosidade(f);
       return {
         funcionario_id: f.id, competencia, salario: f.salario_base, adiantamento: 0, vale_mercado: 0,
         vale_transporte: 0, vale_refeicao: 0, horas_extras: 0, ajuda_custo: 0, outros_proventos: adicional, descontos: 0,
