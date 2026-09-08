@@ -1950,16 +1950,22 @@ function DarBaixaRecorrenteModal({ despesa, accounts, mesReferencia, onClose, on
 
 function DespesasFixasView({ recurringExpenses, transactions, accounts, categories, canManage, onAdd, onToggleAtivo, onDarBaixa, onDesfazerBaixa }) {
   const [modal, setModal] = useState(null);
-  const [filtroMes, setFiltroMes] = useState(todayISO().slice(0, 7));
+  const [filtroMes, setFiltroMes] = useState(() => {
+    const corteMes = CORTE_HISTORICO.slice(0, 7);
+    const agora = todayISO().slice(0, 7);
+    return agora >= corteMes ? agora : corteMes;
+  });
   const ativas = recurringExpenses.filter((r) => r.ativo);
   const inativas = recurringExpenses.filter((r) => !r.ativo);
   const totalMensal = ativas.reduce((s, r) => s + r.valor, 0);
 
   const mesesDisponiveis = (() => {
     const arr = [];
+    const [anoCorte, mesCorteNum] = CORTE_HISTORICO.slice(0, 7).split("-").map(Number);
     const [anoAtual, mesAtualNum] = todayISO().slice(0, 7).split("-").map(Number);
-    for (let i = -6; i <= 2; i++) {
-      const d = new Date(anoAtual, mesAtualNum - 1 + i, 1);
+    const totalMesesAteAtual = (anoAtual - anoCorte) * 12 + (mesAtualNum - mesCorteNum);
+    for (let i = 0; i <= totalMesesAteAtual + 2; i++) {
+      const d = new Date(anoCorte, mesCorteNum - 1 + i, 1);
       arr.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
     }
     return arr;
