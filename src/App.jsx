@@ -3675,13 +3675,17 @@ export default function App() {
     const jaExistem = new Set(payrollEntries.filter((p) => p.competencia === competencia).map((p) => p.funcionario_id));
     const faltando = ativos.filter((f) => !jaExistem.has(f.id));
     if (faltando.length === 0) return;
+    // salário/vale mercado da competência X vencem no dia 8 do mês seguinte
+    const [anoComp, mesComp] = competencia.split("-").map(Number);
+    const dVenc = new Date(anoComp, mesComp, 8); // mesComp já é "mês seguinte" em índice 0-based
+    const dataPrevistaPagamento = `${dVenc.getFullYear()}-${String(dVenc.getMonth() + 1).padStart(2, "0")}-08`;
     const novasLinhas = faltando.map((f) => {
       const adicional = calcAdicionalPericulosidade(f);
       return {
         funcionario_id: f.id, competencia, salario: f.salario_base, adiantamento: 0, vale_mercado: 0,
         vale_transporte: 0, vale_refeicao: 0, horas_extras: 0, ajuda_custo: 0, outros_proventos: adicional, descontos: 0,
         observacoes: adicional > 0 ? `Inclui ${f.periculosidade_insalubridade} (R$ ${adicional.toFixed(2).replace(".", ",")})` : null,
-        data_prevista_pagamento: competencia, created_by: currentUser.id,
+        data_prevista_pagamento: dataPrevistaPagamento, created_by: currentUser.id,
       };
     });
     const { error } = await supabase.from("payroll_entries").insert(novasLinhas);
