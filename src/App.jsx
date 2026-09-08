@@ -874,11 +874,12 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
 
       {(despesasPrevistas || contasReceber) && (
         <div>
-          <p className="font-semibold mb-2 fin-display">📊 Previsão financeira</p>
+          <p className="font-semibold mb-2 fin-display">📊 Previsão financeira — {monthLabel(month, year)}</p>
           <Card style={{ background: "var(--navy)", border: "none" }} className="text-white">
             {(() => {
-              const saidasPrevistas = (despesasPrevistas || []).filter((d) => d.status !== "paga").reduce((s, d) => s + d.valor_previsto, 0);
-              const entradasPrevistas = (contasReceber || []).filter((n) => n.status !== "recebido").reduce((s, n) => s + n.valor, 0);
+              const noMesSelecionado = (data) => (data || "").slice(0, 7) === `${year}-${String(month).padStart(2, "0")}`;
+              const saidasPrevistas = (despesasPrevistas || []).filter((d) => d.status !== "paga" && noMesSelecionado(d.data_vencimento)).reduce((s, d) => s + d.valor_previsto, 0);
+              const entradasPrevistas = (contasReceber || []).filter((n) => n.status !== "recebido" && noMesSelecionado(n.data_prevista_recebimento)).reduce((s, n) => s + n.valor, 0);
               const saldoProjetado = engine.saldoConsolidado + entradasPrevistas - saidasPrevistas;
               return (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1404,17 +1405,35 @@ function MarcarPagaModal({ despesa, accounts, onClose, onSave }) {
 
 function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canManage, onAdd, onMarcarPaga }) {
   const [modal, setModal] = useState(null);
+  const [filtroMes, setFiltroMes] = useState(todayISO().slice(0, 7));
   const comStatus = despesasPrevistas.map((d) => ({ ...d, statusCalc: despesaPrevistaStatus(d) }));
-  const abertas = comStatus.filter((d) => d.statusCalc !== "paga").sort((a, b) => (a.data_vencimento || "").localeCompare(b.data_vencimento || ""));
-  const pagas = comStatus.filter((d) => d.statusCalc === "paga").sort((a, b) => (b.data_pagamento || "").localeCompare(a.data_pagamento || ""));
+
+  const mesesDisponiveis = Array.from(new Set(
+    comStatus.map((d) => (d.statusCalc === "paga" ? d.data_pagamento : d.data_vencimento) || "").filter(Boolean).map((x) => x.slice(0, 7))
+  )).sort();
+  if (filtroMes && !mesesDisponiveis.includes(filtroMes)) mesesDisponiveis.push(filtroMes);
+  mesesDisponiveis.sort();
+
+  const noMes = (data) => !filtroMes || (data || "").slice(0, 7) === filtroMes;
+
+  const abertas = comStatus.filter((d) => d.statusCalc !== "paga" && noMes(d.data_vencimento)).sort((a, b) => (a.data_vencimento || "").localeCompare(b.data_vencimento || ""));
+  const pagas = comStatus.filter((d) => d.statusCalc === "paga" && noMes(d.data_pagamento)).sort((a, b) => (b.data_pagamento || "").localeCompare(a.data_pagamento || ""));
   const totais = {
-    prevista: comStatus.filter((d) => d.statusCalc === "prevista").reduce((s, d) => s + d.valor_previsto, 0),
-    atrasada: comStatus.filter((d) => d.statusCalc === "atrasada").reduce((s, d) => s + d.valor_previsto, 0),
+    prevista: abertas.filter((d) => d.statusCalc === "prevista").reduce((s, d) => s + d.valor_previsto, 0),
+    atrasada: abertas.filter((d) => d.statusCalc === "atrasada").reduce((s, d) => s + d.valor_previsto, 0),
     paga: pagas.reduce((s, d) => s + (d.valor_pago || d.valor_previsto), 0),
   };
 
   return (
     <div className="space-y-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="font-semibold fin-display text-lg">Despesas Previstas</p>
+        <Select value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)} className="w-auto">
+          <option value="">Todos os meses</option>
+          {mesesDisponiveis.map((ym) => <option key={ym} value={ym}>{fmtMesAno(ym)}</option>)}
+        </Select>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🟡 Previstas (em aberto)</p><Money v={totais.prevista} /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🔴 Em atraso</p><Money v={totais.atrasada} tone="neg" /></Card>
