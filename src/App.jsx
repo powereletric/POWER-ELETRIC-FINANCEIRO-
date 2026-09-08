@@ -2163,7 +2163,7 @@ const EMPLOYEE_STATUS_META = {
 function calcAdicionalPericulosidade(f) {
   if (!f.periculosidade_insalubridade) return 0;
   const v = f.valor_adicional || 0;
-  if (f.adicional_tipo === "percentual") return (f.salario_base || 0) * (v / 100);
+  if (f.adicional_tipo === "percentual") return Math.round((f.salario_base || 0) * (v / 100) * 100) / 100;
   return v;
 }
 
@@ -2435,7 +2435,6 @@ function FolhaRow({ entry, funcionario, pagamentos, accounts, canManage, onUpdat
       <td className="px-2 py-2">{numInput("horas_extras")}</td>
       <td className="px-2 py-2">{numInput("ajuda_custo")}</td>
       <td className="px-2 py-2">{numInput("outros_proventos")}</td>
-      <td className="px-2 py-2">{numInput("descontos")}</td>
       <td className="px-3 py-2 fin-mono text-xs font-semibold whitespace-nowrap">{fmtBRL(total)}</td>
       <td className="px-3 py-2 fin-mono text-xs whitespace-nowrap" style={{ color: "var(--green)" }}>{fmtBRL(pago)}</td>
       <td className="px-3 py-2 fin-mono text-xs whitespace-nowrap" style={{ color: pendente > 0.009 ? "var(--red)" : "var(--ink-soft)" }}>{fmtBRL(Math.max(0, pendente))}</td>
@@ -2486,13 +2485,13 @@ function FolhaPagamentoView({ employees, payrollEntries, payrollPayments, accoun
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
-                {["Funcionário", "Salário", "Adiant.", "Vale merc.", "Vale transp.", "Vale refeição", "H. extras", "Ajuda custo", "Outros", "Descontos", "Total", "Pago", "Pendente", "Status", ""].map((h) => (
+                {["Funcionário", "Salário", "Adiant.", "Vale merc.", "Vale transp.", "Vale refeição", "H. extras", "Ajuda custo", "Outros", "Total", "Pago", "Pendente", "Status", ""].map((h) => (
                   <th key={h} className="text-left px-2 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {entriesDoMes.length === 0 && <tr><td colSpan={15}><EmptyState text="Nenhum funcionário ativo nesta competência." /></td></tr>}
+              {entriesDoMes.length === 0 && <tr><td colSpan={14}><EmptyState text="Nenhum funcionário ativo nesta competência." /></td></tr>}
               {entriesDoMes.map((entry) => (
                 <FolhaRow key={entry.id} entry={entry} funcionario={ativos.find((f) => f.id === entry.funcionario_id)}
                   pagamentos={payrollPayments} accounts={accounts.filter((a) => a.active)} canManage={canManage}
@@ -2985,8 +2984,43 @@ function RegistrarPagamentoConsolidadoModal({ linha, accounts, onClose, onSave }
   );
 }
 
+function ConfirmarLotePagamentoModal({ qtd, totalPlanejado, accounts, onClose, onSave }) {
+  const [dataPagamento, setDataPagamento] = useState(todayISO());
+  const [conta, setConta] = useState(accounts[0]?.id || "");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!conta) { setErr("Selecione a conta."); return; }
+    setSaving(true);
+    const ok = await onSave({ dataPagamento, conta });
+    setSaving(false);
+    if (!ok) setErr("Alguns pagamentos podem não ter sido registrados. Confira a lista antes de tentar de novo.");
+  };
+
+  return (
+    <Modal title="Confirmar pagamentos planejados" onClose={onClose}>
+      <Card className="mb-4" style={{ background: "var(--amber-soft)", border: "none" }}>
+        <p className="text-sm">{qtd} funcionário{qtd > 1 ? "s" : ""} vai{qtd > 1 ? "ão" : ""} receber um pagamento agora, somando <Money v={totalPlanejado} size="sm" tone="neg" />.</p>
+      </Card>
+      <Field label="Data do pagamento" required><TextInput type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} /></Field>
+      <Field label="Conta" required><Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Registrando..." : `Confirmar ${qtd} pagamento${qtd > 1 ? "s" : ""}`}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function PagamentosAbertoView({ employees, payrollEntries, payrollPayments, agreements, installments, accounts, canManage, onPagar }) {
   const [modal, setModal] = useState(null);
+  const [planejando, setPlanejando] = useState(false);
+  const [verba, setVerba] = useState("");
+  const [valoresPlano, setValoresPlano] = useState({}); // funcionarioId -> string digitado
+  const [confirmando, setConfirmando] = useState(false);
+
   const ativos = employees.filter((e) => e.status === "ativo" || e.status === "afastado" || e.status === "esperando_acordo");
   const inativos = employees.filter((e) => e.status === "inativo");
 
@@ -3013,6 +3047,31 @@ function PagamentosAbertoView({ employees, payrollEntries, payrollPayments, agre
   const totalGeralAtivos = linhasAtivos.reduce((s, l) => s + l.total, 0);
   const totalGeralInativos = linhasInativos.reduce((s, l) => s + l.total, 0);
 
+  const todasLinhas = [...linhasAtivos, ...linhasInativos];
+  const totalPlanejado = todasLinhas.reduce((s, l) => s + (parseValorBR(valoresPlano[l.funcionario.id]) || 0), 0);
+  const vVerba = parseValorBR(verba) || 0;
+  const saldoVerba = vVerba - totalPlanejado;
+  const qtdComValor = todasLinhas.filter((l) => (parseValorBR(valoresPlano[l.funcionario.id]) || 0) > 0.009).length;
+
+  const confirmarLote = async ({ dataPagamento, conta }) => {
+    setConfirmando(true);
+    let tudoOk = true;
+    for (const l of todasLinhas) {
+      const v = parseValorBR(valoresPlano[l.funcionario.id]) || 0;
+      if (v <= 0.009) continue;
+      const ok = await onPagar(l, { dataPagamento, valorPago: v, conta });
+      if (!ok) tudoOk = false;
+    }
+    setConfirmando(false);
+    if (tudoOk) { setValoresPlano({}); setPlanejando(false); setModal(null); }
+    return tudoOk;
+  };
+
+  const valorInput = (linha) => (
+    <TextInput inputMode="decimal" placeholder="0,00" value={valoresPlano[linha.funcionario.id] || ""} style={{ width: 100, padding: "6px 8px", fontSize: 13 }}
+      onChange={(e) => setValoresPlano((s) => ({ ...s, [linha.funcionario.id]: e.target.value }))} />
+  );
+
   return (
     <div className="space-y-6">
       <Card style={{ background: "var(--teal-soft)", border: "none" }}>
@@ -3023,6 +3082,37 @@ function PagamentosAbertoView({ employees, payrollEntries, payrollPayments, agre
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total pendente — ativos</p><Money v={totalGeralAtivos} tone="neg" size="lg" /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total pendente — inativos/rescisão</p><Money v={totalGeralInativos} tone="neg" size="lg" /></Card>
       </div>
+
+      {canManage && (
+        <Card style={{ background: "var(--navy)", border: "none" }} className="text-white">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide" style={{ color: "var(--gold-soft)" }}>Planejar pagamentos</p>
+              <p className="text-xs mt-1" style={{ color: "#C7CEDC" }}>Digite quanto vai pagar de cada um e veja a soma bater com a verba disponível.</p>
+            </div>
+            <Btn variant={planejando ? "subtle" : "gold"} onClick={() => setPlanejando((s) => !s)}>{planejando ? "Sair do modo planejamento" : "Planejar pagamentos"}</Btn>
+          </div>
+          {planejando && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+              <div>
+                <p className="text-xs" style={{ color: "var(--gold-soft)" }}>Verba disponível (opcional)</p>
+                <TextInput inputMode="decimal" value={verba} onChange={(e) => setVerba(e.target.value)} placeholder="Ex: 30000,00" style={{ background: "#fff" }} />
+              </div>
+              <div>
+                <p className="text-xs" style={{ color: "var(--gold-soft)" }}>Total planejado até agora</p>
+                <p className="fin-mono font-semibold text-xl">{fmtBRL(totalPlanejado)}</p>
+              </div>
+              <div>
+                <p className="text-xs" style={{ color: "var(--gold-soft)" }}>{vVerba > 0 ? (saldoVerba >= 0 ? "Sobra da verba" : "Passou da verba") : "Funcionários com valor digitado"}</p>
+                <p className="fin-mono font-semibold text-xl" style={{ color: vVerba > 0 && saldoVerba < 0 ? "var(--red)" : "#fff" }}>{vVerba > 0 ? fmtBRL(Math.abs(saldoVerba)) : qtdComValor}</p>
+              </div>
+            </div>
+          )}
+          {planejando && qtdComValor > 0 && (
+            <Btn variant="gold" className="mt-3" onClick={() => setModal({ kind: "lote" })} disabled={confirmando}>Confirmar {qtdComValor} pagamento{qtdComValor > 1 ? "s" : ""}</Btn>
+          )}
+        </Card>
+      )}
 
       {Object.entries(porEmpresa).map(([empresa, linhas]) => {
         const totalEmpresa = linhas.reduce((s, l) => s + l.total, 0);
@@ -3037,7 +3127,7 @@ function PagamentosAbertoView({ employees, payrollEntries, payrollPayments, agre
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
-                      {["Funcionário", "Salário", "Vale merc./transp./ref.", "Adiantamento", "Horas extras", "Outros", "Descontos", "Acordo", "Férias", "Total pendente", ""].map((h) => (
+                      {["Funcionário", "Salário", "Vale merc./transp./ref.", "Adiantamento", "Horas extras", "Outros", "Descontos", "Acordo", "Férias", "Total pendente", planejando ? "Valor a pagar" : ""].map((h) => (
                         <th key={h} className="text-left px-3 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -3056,7 +3146,7 @@ function PagamentosAbertoView({ employees, payrollEntries, payrollPayments, agre
                         <td className="px-3 py-2 fin-mono text-xs whitespace-nowrap">{l.ferias > 0 ? fmtBRL(l.ferias) : "—"}</td>
                         <td className="px-3 py-2 fin-mono text-xs font-semibold whitespace-nowrap">{fmtBRL(l.total)}</td>
                         <td className="px-3 py-2 whitespace-nowrap">
-                          {canManage && <Btn variant="gold" onClick={() => setModal({ linha: l })}>Pagar</Btn>}
+                          {canManage && (planejando ? valorInput(l) : <Btn variant="gold" onClick={() => setModal({ linha: l })}>Pagar</Btn>)}
                         </td>
                       </tr>
                     ))}
@@ -3080,7 +3170,7 @@ function PagamentosAbertoView({ employees, payrollEntries, payrollPayments, agre
                 </div>
                 <div className="flex items-center gap-3">
                   <Money v={l.total} size="sm" tone="neg" />
-                  {canManage && <Btn variant="gold" onClick={() => setModal({ linha: l })}>Pagar</Btn>}
+                  {canManage && (planejando ? valorInput(l) : <Btn variant="gold" onClick={() => setModal({ linha: l })}>Pagar</Btn>)}
                 </div>
               </div>
             ))}
@@ -3088,7 +3178,8 @@ function PagamentosAbertoView({ employees, payrollEntries, payrollPayments, agre
         </div>
       )}
 
-      {modal && <RegistrarPagamentoConsolidadoModal linha={modal.linha} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (l, p) => { const ok = await onPagar(l, p); if (ok) setModal(null); return ok; }} />}
+      {modal?.linha && <RegistrarPagamentoConsolidadoModal linha={modal.linha} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (l, p) => { const ok = await onPagar(l, p); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "lote" && <ConfirmarLotePagamentoModal qtd={qtdComValor} totalPlanejado={totalPlanejado} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={confirmarLote} />}
     </div>
   );
 }
@@ -3824,7 +3915,7 @@ export default function App() {
         <div className={`p-4 md:p-7 mx-auto ${["fluxo", "folha", "pagamentos-abertos"].includes(tab) ? "max-w-full" : "max-w-6xl"}`}>
           <div className="hidden md:flex items-center justify-between mb-6">
             <h1 className="fin-display text-2xl font-semibold">{navItems.find((n) => n.key === tab)?.label}</h1>
-            {role.canLancar && <Btn variant="gold" icon={Plus} onClick={() => openQuick("despesa")}>Novo lançamento</Btn>}
+            {role.canLancar && !["folha", "funcionarios", "horas-extras", "documentos-rh", "acordos", "dashboard-rh", "pagamentos-abertos", "config", "categorias"].includes(tab) && <Btn variant="gold" icon={Plus} onClick={() => openQuick("despesa")}>Novo lançamento</Btn>}
           </div>
 
           {errorBanner && <Card className="mb-4" style={{ background: "var(--red-soft)", border: "none" }}><p className="text-sm" style={{ color: "var(--red)" }}>{errorBanner}</p></Card>}
