@@ -2463,8 +2463,11 @@ function FolhaPagamentoView({ employees, payrollEntries, payrollPayments, accoun
     const total = payrollTotal(e);
     acc.total += total; acc.pago += pago; acc.pendente += Math.max(0, total - pago);
     if (payrollStatus(e, pago) === "atrasado") acc.atrasadas += 1;
+    acc.valeMercado += e.vale_mercado || 0;
+    acc.salarioGrupo += (e.salario || 0) + (e.ajuda_custo || 0) + (e.outros_proventos || 0) + (e.horas_extras || 0);
+    acc.adiantamento += e.adiantamento || 0;
     return acc;
-  }, { total: 0, pago: 0, pendente: 0, atrasadas: 0 });
+  }, { total: 0, pago: 0, pendente: 0, atrasadas: 0, valeMercado: 0, salarioGrupo: 0, adiantamento: 0 });
 
   return (
     <div className="space-y-5">
@@ -2479,6 +2482,11 @@ function FolhaPagamentoView({ employees, payrollEntries, payrollPayments, accoun
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Já pago</p><Money v={totals.pago} tone="pos" /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Pendente</p><Money v={totals.pendente} tone="neg" /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Atrasadas</p><p className="fin-mono text-xl font-semibold" style={{ color: totals.atrasadas > 0 ? "var(--red)" : "var(--ink)" }}>{totals.atrasadas}</p></Card>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Salário + Ajuda custo + Outros + H. extras</p><Money v={totals.salarioGrupo} tone="neg" /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Vale mercado</p><Money v={totals.valeMercado} tone="neg" /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Adiantamento</p><Money v={totals.adiantamento} tone="neg" /></Card>
       </div>
       <Card className="p-0 overflow-hidden">
         <div className="fin-scroll overflow-x-auto">
