@@ -2447,12 +2447,26 @@ function FolhaRow({ entry, funcionario, pagamentos, accounts, canManage, onUpdat
   );
 }
 
+const FOLHA_INICIO = "2026-07-01"; // início oficial do controle de folha — não gera meses antes disso
+
 function FolhaPagamentoView({ employees, payrollEntries, payrollPayments, accounts, canManage, onEnsureEntries, onUpdateField, onPagar }) {
-  const now = new Date();
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [year, setYear] = useState(now.getFullYear());
+  const mesesDisponiveis = (() => {
+    const arr = [];
+    const [anoIni, mesIniNum] = FOLHA_INICIO.slice(0, 7).split("-").map(Number);
+    const [anoAtual, mesAtualNum] = todayISO().slice(0, 7).split("-").map(Number);
+    const totalMesesAteAtual = (anoAtual - anoIni) * 12 + (mesAtualNum - mesIniNum);
+    for (let i = 0; i <= totalMesesAteAtual + 1; i++) {
+      const d = new Date(anoIni, mesIniNum - 1 + i, 1);
+      arr.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
+    return arr;
+  })();
+  const [competenciaYM, setCompetenciaYM] = useState(() => {
+    const agora = todayISO().slice(0, 7);
+    return mesesDisponiveis.includes(agora) ? agora : mesesDisponiveis[mesesDisponiveis.length - 1];
+  });
   const [modal, setModal] = useState(null);
-  const competencia = `${year}-${String(month).padStart(2, "0")}-01`;
+  const competencia = `${competenciaYM}-01`;
   const ativos = employees.filter((e) => e.status === "ativo");
 
   useEffect(() => { onEnsureEntries(competencia, ativos); }, [competencia]); // eslint-disable-line
@@ -2469,13 +2483,22 @@ function FolhaPagamentoView({ employees, payrollEntries, payrollPayments, accoun
     return acc;
   }, { total: 0, pago: 0, pendente: 0, atrasadas: 0, valeMercado: 0, salarioGrupo: 0, adiantamento: 0 });
 
+  // agrupa por empresa, com os funcionários sempre em ordem alfabética dentro de cada grupo
+  const entriesPorEmpresa = {};
+  entriesDoMes.forEach((entry) => {
+    const func = ativos.find((f) => f.id === entry.funcionario_id);
+    const emp = func?.empresa || "Sem empresa definida";
+    if (!entriesPorEmpresa[emp]) entriesPorEmpresa[emp] = [];
+    entriesPorEmpresa[emp].push({ entry, func });
+  });
+  Object.values(entriesPorEmpresa).forEach((lista) => lista.sort((a, b) => (a.func?.nome || "").localeCompare(b.func?.nome || "")));
+
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-2 flex-wrap">
-        <Select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ width: 160 }}>
-          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{new Date(2000, m - 1, 1).toLocaleDateString("pt-BR", { month: "long" })}</option>)}
+        <Select value={competenciaYM} onChange={(e) => setCompetenciaYM(e.target.value)} style={{ width: 200 }}>
+          {mesesDisponiveis.map((ym) => <option key={ym} value={ym}>{fmtMesAno(ym)}</option>)}
         </Select>
-        <Select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 110 }}>{[year - 1, year, year + 1].map((y) => <option key={y} value={y}>{y}</option>)}</Select>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total da folha</p><Money v={totals.total} tone="neg" /></Card>
@@ -2488,27 +2511,35 @@ function FolhaPagamentoView({ employees, payrollEntries, payrollPayments, accoun
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Vale mercado</p><Money v={totals.valeMercado} tone="neg" /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Adiantamento</p><Money v={totals.adiantamento} tone="neg" /></Card>
       </div>
-      <Card className="p-0 overflow-hidden">
-        <div className="fin-scroll overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
-                {["Funcionário", "Salário", "Adiant.", "Vale merc.", "Vale transp.", "Vale refeição", "H. extras", "Ajuda custo", "Outros", "Total", "Pago", "Pendente", "Status", ""].map((h) => (
-                  <th key={h} className="text-left px-2 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {entriesDoMes.length === 0 && <tr><td colSpan={14}><EmptyState text="Nenhum funcionário ativo nesta competência." /></td></tr>}
-              {entriesDoMes.map((entry) => (
-                <FolhaRow key={entry.id} entry={entry} funcionario={ativos.find((f) => f.id === entry.funcionario_id)}
-                  pagamentos={payrollPayments} accounts={accounts.filter((a) => a.active)} canManage={canManage}
-                  onUpdateField={onUpdateField} onPagar={(e, f, pend) => setModal({ entry: e, funcionario: f, pendente: pend })} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      {entriesDoMes.length === 0 ? (
+        <Card><EmptyState text="Nenhum funcionário ativo nesta competência." /></Card>
+      ) : (
+        Object.entries(entriesPorEmpresa).sort(([a], [b]) => a.localeCompare(b)).map(([empresa, lista]) => (
+          <div key={empresa}>
+            <p className="font-semibold mb-2 fin-display">⚡ {empresa}</p>
+            <Card className="p-0 overflow-hidden">
+              <div className="fin-scroll overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
+                      {["Funcionário", "Salário", "Adiant.", "Vale merc.", "Vale transp.", "Vale refeição", "H. extras", "Ajuda custo", "Outros", "Total", "Pago", "Pendente", "Status", ""].map((h) => (
+                        <th key={h} className="text-left px-2 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lista.map(({ entry, func }) => (
+                      <FolhaRow key={entry.id} entry={entry} funcionario={func}
+                        pagamentos={payrollPayments} accounts={accounts.filter((a) => a.active)} canManage={canManage}
+                        onUpdateField={onUpdateField} onPagar={(e, f, pend) => setModal({ entry: e, funcionario: f, pendente: pend })} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+        ))
+      )}
       {modal && <RegistrarPagamentoFolhaModal entry={modal.entry} funcionario={modal.funcionario} pendente={modal.pendente} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (e, p) => { const ok = await onPagar(e, p); if (ok) setModal(null); return ok; }} />}
     </div>
   );
