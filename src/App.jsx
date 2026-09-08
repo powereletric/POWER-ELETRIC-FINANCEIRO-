@@ -710,7 +710,7 @@ function resolveCategoryEmoji(categories, name) {
   return categoryEmoji(name);
 }
 const QUICK_EMOJIS = ["🍽️", "⛽", "🛣️", "👷", "🔧", "🧾", "🏛️", "👥", "↩️", "🚚", "🧰", "🏨", "⚖️", "📑", "🛠️", "💵", "✈️", "📂", "🏦", "💳", "🛒", "📦", "🧹", "🎓"];
-function DashboardView({ accounts, transactions, engine, onQuickAction, role, categories, despesasPrevistas, contasReceber }) {
+function DashboardView({ accounts, transactions, engine, onQuickAction, role, categories, despesasPrevistas, contasReceber, recurringExpenses }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -898,7 +898,11 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
           <Card style={{ background: "var(--navy)", border: "none" }} className="text-white">
             {(() => {
               const noMesSelecionado = (data) => (data || "").slice(0, 7) === `${year}-${String(month).padStart(2, "0")}`;
-              const saidasPrevistas = (despesasPrevistas || []).filter((d) => d.status !== "paga" && noMesSelecionado(d.data_vencimento)).reduce((s, d) => s + d.valor_previsto, 0);
+              const saidasDespesasPrevistas = (despesasPrevistas || []).filter((d) => d.status !== "paga" && noMesSelecionado(d.data_vencimento)).reduce((s, d) => s + d.valor_previsto, 0);
+              const mesSelecionadoStr = `${year}-${String(month).padStart(2, "0")}`;
+              const baixasFixasDoMes = new Set(transactions.filter((t) => t.refRecurringExpenseId && (t.date || "").slice(0, 7) === mesSelecionadoStr).map((t) => t.refRecurringExpenseId));
+              const saidasFixasPendentes = (recurringExpenses || []).filter((r) => r.ativo && !baixasFixasDoMes.has(r.id)).reduce((s, r) => s + r.valor, 0);
+              const saidasPrevistas = saidasDespesasPrevistas + saidasFixasPendentes;
               const entradasPrevistas = (contasReceber || []).filter((n) => n.status !== "recebido" && noMesSelecionado(n.data_prevista_recebimento)).reduce((s, n) => s + n.valor, 0);
               const saldoProjetado = engine.saldoConsolidado + entradasPrevistas - saidasPrevistas;
               return (
@@ -1250,7 +1254,7 @@ function RelatoriosView({ transactions, accounts, engine }) {
 /* ============================================================
    VIEWS: ADIANTAMENTOS / REEMBOLSOS
    ============================================================ */
-function AdiantamentosView({ engine, accounts, onBaixa, onDevolucao }) {
+function AdiantamentosView({ engine, accounts, onBaixa, onDevolucao, onExcluir, canDelete }) {
   const abertos = engine.adiantamentos.filter((a) => a.saldoAPrestar > 0.009);
   const quitados = engine.adiantamentos.filter((a) => a.saldoAPrestar <= 0.009);
   return (
@@ -1259,23 +1263,27 @@ function AdiantamentosView({ engine, accounts, onBaixa, onDevolucao }) {
         <p className="font-semibold mb-2 fin-display">Em aberto — valores em poder de terceiros</p>
         {abertos.length === 0 ? <EmptyState text="Nenhum adiantamento em aberto." /> : (
           <div className="grid md:grid-cols-2 gap-3">
-            {abertos.map((a) => (
-              <Card key={a.id}>
-                <div className="flex justify-between items-start">
-                  <div><p className="font-semibold">{a.pessoa}</p><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Enviado em {fmtDate(a.date)} · {accName(accounts, a.conta)}</p></div>
-                  <Pill tone="amber">a prestar contas</Pill>
-                </div>
-                <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
-                  <div><p style={{ color: "var(--ink-soft)" }}>Enviado</p><Money v={a.valor} size="sm" /></div>
-                  <div><p style={{ color: "var(--ink-soft)" }}>Usado</p><Money v={a.usado} size="sm" /></div>
-                  <div><p style={{ color: "var(--ink-soft)" }}>A prestar</p><Money v={a.saldoAPrestar} size="sm" tone="neg" /></div>
-                </div>
-                <div className="flex gap-2 mt-3">
-                  <Btn variant="subtle" onClick={() => onBaixa(a)}>Registrar despesa</Btn>
-                  <Btn variant="ghost" onClick={() => onDevolucao(a)}>Registrar devolução</Btn>
-                </div>
-              </Card>
-            ))}
+            {abertos.map((a) => {
+              const semUso = a.usado <= 0.009 && a.devolvido <= 0.009;
+              return (
+                <Card key={a.id}>
+                  <div className="flex justify-between items-start">
+                    <div><p className="font-semibold">{a.pessoa}</p><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Enviado em {fmtDate(a.date)} · {accName(accounts, a.conta)}</p></div>
+                    <Pill tone="amber">a prestar contas</Pill>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
+                    <div><p style={{ color: "var(--ink-soft)" }}>Enviado</p><Money v={a.valor} size="sm" /></div>
+                    <div><p style={{ color: "var(--ink-soft)" }}>Usado</p><Money v={a.usado} size="sm" /></div>
+                    <div><p style={{ color: "var(--ink-soft)" }}>A prestar</p><Money v={a.saldoAPrestar} size="sm" tone="neg" /></div>
+                  </div>
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    <Btn variant="subtle" onClick={() => onBaixa(a)}>Registrar despesa</Btn>
+                    <Btn variant="ghost" onClick={() => onDevolucao(a)}>Registrar devolução</Btn>
+                    {canDelete && semUso && <Btn variant="danger" icon={Trash2} onClick={() => onExcluir(a)}>Excluir</Btn>}
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1964,7 +1972,7 @@ function DespesasFixasView({ recurringExpenses, transactions, accounts, categori
     const [anoCorte, mesCorteNum] = CORTE_HISTORICO.slice(0, 7).split("-").map(Number);
     const [anoAtual, mesAtualNum] = todayISO().slice(0, 7).split("-").map(Number);
     const totalMesesAteAtual = (anoAtual - anoCorte) * 12 + (mesAtualNum - mesCorteNum);
-    for (let i = 0; i <= totalMesesAteAtual + 2; i++) {
+    for (let i = 0; i <= totalMesesAteAtual + 6; i++) {
       const d = new Date(anoCorte, mesCorteNum - 1 + i, 1);
       arr.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
     }
@@ -3470,9 +3478,9 @@ export default function App() {
 
           {errorBanner && <Card className="mb-4" style={{ background: "var(--red-soft)", border: "none" }}><p className="text-sm" style={{ color: "var(--red)" }}>{errorBanner}</p></Card>}
 
-          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} categories={categories} despesasPrevistas={despesasPrevistas} contasReceber={contasReceber} />}
+          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} categories={categories} despesasPrevistas={despesasPrevistas} contasReceber={contasReceber} recurringExpenses={recurringExpenses} />}
           {tab === "fluxo" && <FluxoCaixaView transactions={transactions} accounts={accounts} categories={categories} onToggleConferido={toggleConferido} onDelete={deleteTransaction} onEdit={(t) => setModal({ kind: "edit-tx", tx: t })} canDelete={role.canDelete} />}
-          {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} />}
+          {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} onExcluir={deleteTransaction} canDelete={role.canDelete} />}
           {tab === "reembolsos" && <ReembolsosView engine={engine} onPagar={(r) => setModal({ kind: "reembolso", reembolso: r })} />}
           {tab === "emprestimos" && <EmprestimosView engine={engine} onPagar={(e) => setModal({ kind: "pagar-emprestimo", emprestimo: e })} />}
           {tab === "despesas-fixas" && <DespesasFixasView recurringExpenses={recurringExpenses} transactions={transactions} accounts={accounts} categories={categories} canManage={role.canLancar} onAdd={addRecurringExpense} onToggleAtivo={toggleRecurringExpenseAtivo} onDarBaixa={darBaixaRecorrente} onDesfazerBaixa={desfazerBaixaRecorrente} />}
