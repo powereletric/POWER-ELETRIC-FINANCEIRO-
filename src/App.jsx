@@ -1845,12 +1845,11 @@ function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcar
    Salários, boletos, parcelas de empréstimo. Ao "dar baixa" no mês, cria a despesa
    real ligada (ref_recurring_expense_id) — não duplica se já foi dada baixa no mês.
    ============================================================ */
-function NovaDespesaFixaModal({ categories, accounts, onClose, onSave }) {
+function NovaDespesaFixaModal({ categories, onClose, onSave }) {
   const [descricao, setDescricao] = useState("");
   const [categoria, setCategoria] = useState(categories[0]?.name || "");
   const [valor, setValor] = useState("");
   const [diaVencimento, setDiaVencimento] = useState("5");
-  const [conta, setConta] = useState(accounts[0]?.id || "");
   const [pessoa, setPessoa] = useState("");
   const [tipoRecorrencia, setTipoRecorrencia] = useState("indefinida");
   const [parcelasTotais, setParcelasTotais] = useState("12");
@@ -1866,7 +1865,7 @@ function NovaDespesaFixaModal({ categories, accounts, onClose, onSave }) {
     setSaving(true);
     const parcelas = tipoRecorrencia === "parcelada" ? (parseInt(parcelasTotais, 10) || 1) : null;
     const ok = await onSave({
-      descricao: descricao.trim(), categoria, valor: v, dia_vencimento: dia, conta_id: conta || null,
+      descricao: descricao.trim(), categoria, valor: v, dia_vencimento: dia,
       pessoa: pessoa.trim(), tipo_recorrencia: tipoRecorrencia,
       parcelas_totais: parcelas, parcelas_restantes: parcelas, ativo: true,
     });
@@ -1878,13 +1877,13 @@ function NovaDespesaFixaModal({ categories, accounts, onClose, onSave }) {
     <Modal title="Nova despesa fixa" onClose={onClose}>
       <Field label="Descrição" required><TextInput value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex: Salário Alex, Aluguel, Parcela empréstimo BB" /></Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Valor (R$)" required><TextInput inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></Field>
+        <Field label="Valor da parcela (R$)" required><TextInput inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" /></Field>
         <Field label="Dia do vencimento" required><TextInput inputMode="numeric" value={diaVencimento} onChange={(e) => setDiaVencimento(e.target.value)} placeholder="Ex: 5" /></Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Categoria"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</Select></Field>
-        <Field label="Conta de pagamento"><Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
-      </div>
+      <Field label="Categoria"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</Select></Field>
+      <Card className="mb-3" style={{ background: "var(--teal-soft)", border: "none" }}>
+        <p className="text-xs">A conta usada pra pagar você escolhe na hora de dar baixa a cada mês, já que pode variar.</p>
+      </Card>
       <Field label="Pessoa / fornecedor"><TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} /></Field>
       <Field label="Tipo">
         <Select value={tipoRecorrencia} onChange={(e) => setTipoRecorrencia(e.target.value)}>
@@ -1904,22 +1903,86 @@ function NovaDespesaFixaModal({ categories, accounts, onClose, onSave }) {
   );
 }
 
-function DespesasFixasView({ recurringExpenses, transactions, accounts, categories, canManage, onAdd, onToggleAtivo, onDarBaixa }) {
+function DarBaixaRecorrenteModal({ despesa, accounts, mesReferencia, onClose, onSave }) {
+  const dataDefault = mesReferencia === todayISO().slice(0, 7)
+    ? todayISO()
+    : `${mesReferencia}-${String(Math.min(despesa.dia_vencimento || 5, 28)).padStart(2, "0")}`;
+  const [dataPagamento, setDataPagamento] = useState(dataDefault);
+  const [valor, setValor] = useState(String(despesa.valor ?? "").replace(".", ","));
+  const [juros, setJuros] = useState("0");
+  const [conta, setConta] = useState(accounts[0]?.id || "");
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const vParcela = parseValorBR(valor) || 0;
+  const vJuros = parseValorBR(juros) || 0;
+  const total = vParcela + vJuros;
+
+  const submit = async () => {
+    if (!vParcela || vParcela <= 0) { setErr("Informe o valor da parcela."); return; }
+    if (!conta) { setErr("Selecione a conta."); return; }
+    if (!dataPagamento) { setErr("Informe a data do pagamento."); return; }
+    setSaving(true);
+    const ok = await onSave(despesa, { dataPagamento, valorParcela: vParcela, juros: vJuros, valorTotal: total, conta });
+    setSaving(false);
+    if (!ok) setErr("Não consegui registrar. Tente novamente.");
+  };
+
+  return (
+    <Modal title={`Dar baixa — ${despesa.descricao}`} onClose={onClose}>
+      <Field label="Data do pagamento" required><TextInput type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} /></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Valor da parcela (R$)" required><TextInput inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} /></Field>
+        <Field label="Juros / multa (R$)"><TextInput inputMode="decimal" value={juros} onChange={(e) => setJuros(e.target.value)} placeholder="0,00" /></Field>
+      </div>
+      <Field label="Conta utilizada" required><Select value={conta} onChange={(e) => setConta(e.target.value)}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field>
+      <Card className="mb-3" style={{ background: "#EEEAE0", border: "none" }}>
+        <p className="text-sm">Total a sair da conta: <Money v={total} size="sm" tone="neg" /></p>
+      </Card>
+      {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
+        <Btn variant="gold" icon={Check} onClick={submit} disabled={saving}>{saving ? "Registrando..." : "Confirmar baixa"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function DespesasFixasView({ recurringExpenses, transactions, accounts, categories, canManage, onAdd, onToggleAtivo, onDarBaixa, onDesfazerBaixa }) {
   const [modal, setModal] = useState(null);
-  const mesAtual = todayISO().slice(0, 7);
+  const [filtroMes, setFiltroMes] = useState(todayISO().slice(0, 7));
   const ativas = recurringExpenses.filter((r) => r.ativo);
   const inativas = recurringExpenses.filter((r) => !r.ativo);
   const totalMensal = ativas.reduce((s, r) => s + r.valor, 0);
-  const baixasEsteMes = new Set(transactions.filter((t) => t.refRecurringExpenseId && (t.date || "").slice(0, 7) === mesAtual).map((t) => t.refRecurringExpenseId));
+
+  const mesesDisponiveis = (() => {
+    const arr = [];
+    const [anoAtual, mesAtualNum] = todayISO().slice(0, 7).split("-").map(Number);
+    for (let i = -6; i <= 2; i++) {
+      const d = new Date(anoAtual, mesAtualNum - 1 + i, 1);
+      arr.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
+    return arr;
+  })();
+
+  const baixasDoMes = new Map();
+  transactions.filter((t) => t.refRecurringExpenseId && (t.date || "").slice(0, 7) === filtroMes).forEach((t) => baixasDoMes.set(t.refRecurringExpenseId, t));
 
   return (
     <div className="space-y-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="font-semibold fin-display text-lg">Despesas Fixas</p>
+        <Select value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)} className="w-auto">
+          {mesesDisponiveis.map((ym) => <option key={ym} value={ym}>{fmtMesAno(ym)}</option>)}
+        </Select>
+      </div>
+
       <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total fixo por mês</p><Money v={totalMensal} tone="neg" size="lg" /></Card>
       {canManage && <Btn variant="gold" icon={Plus} onClick={() => setModal({ kind: "nova" })}>Nova despesa fixa</Btn>}
 
       <Card className="p-0 overflow-hidden">
         {ativas.length === 0 ? <div className="p-4"><EmptyState text="Nenhuma despesa fixa cadastrada." /></div> : ativas.map((r, i) => {
-          const jaDeuBaixa = baixasEsteMes.has(r.id);
+          const txBaixa = baixasDoMes.get(r.id);
           return (
             <div key={r.id} className="flex items-center justify-between px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
               <div>
@@ -1933,9 +1996,14 @@ function DespesasFixasView({ recurringExpenses, transactions, accounts, categori
                 <Money v={r.valor} size="sm" tone="neg" />
                 {canManage && (
                   <>
-                    {jaDeuBaixa
-                      ? <Pill tone="green">Baixa dada este mês</Pill>
-                      : <Btn variant="gold" onClick={() => onDarBaixa(r)}>Dar baixa este mês</Btn>}
+                    {txBaixa ? (
+                      <>
+                        <Pill tone="green">Baixa dada · {accName(accounts, txBaixa.conta)}</Pill>
+                        <Btn variant="ghost" onClick={() => onDesfazerBaixa(r, txBaixa)}>Desfazer baixa</Btn>
+                      </>
+                    ) : (
+                      <Btn variant="gold" onClick={() => setModal({ kind: "baixar", despesa: r })}>Dar baixa · {fmtMesAno(filtroMes)}</Btn>
+                    )}
                     <Btn variant="ghost" onClick={() => onToggleAtivo(r)}>Desativar</Btn>
                   </>
                 )}
@@ -1959,7 +2027,8 @@ function DespesasFixasView({ recurringExpenses, transactions, accounts, categori
         </div>
       )}
 
-      {modal?.kind === "nova" && <NovaDespesaFixaModal categories={categories.filter((c) => c.active)} accounts={accounts.filter((a) => a.active)} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "nova" && <NovaDespesaFixaModal categories={categories.filter((c) => c.active)} onClose={() => setModal(null)} onSave={async (d) => { const ok = await onAdd(d); if (ok) setModal(null); return ok; }} />}
+      {modal?.kind === "baixar" && <DarBaixaRecorrenteModal despesa={modal.despesa} accounts={accounts.filter((a) => a.active)} mesReferencia={filtroMes} onClose={() => setModal(null)} onSave={async (d, p) => { const ok = await onDarBaixa(d, p); if (ok) setModal(null); return ok; }} />}
     </div>
   );
 }
@@ -3177,10 +3246,11 @@ export default function App() {
     const { error } = await supabase.from("recurring_expenses").update({ ativo: !r.ativo }).eq("id", r.id);
     if (error) setErrorBanner("Não consegui atualizar: " + error.message);
   };
-  const darBaixaRecorrente = async (r) => {
+  const darBaixaRecorrente = async (r, { dataPagamento, valorTotal, juros, conta }) => {
+    const descricaoComJuros = juros > 0.009 ? `${r.descricao} (inclui R$ ${juros.toFixed(2).replace(".", ",")} de juros/multa)` : r.descricao;
     const { data: txRow, error: txErr } = await supabase.from("transactions").insert(toDb({
-      type: "despesa", date: todayISO(), valor: r.valor, conta: r.conta_id, categoria: r.categoria,
-      pessoa: r.pessoa, descricao: r.descricao, refRecurringExpenseId: r.id,
+      type: "despesa", date: dataPagamento, valor: valorTotal, conta, categoria: r.categoria,
+      pessoa: r.pessoa, descricao: descricaoComJuros, refRecurringExpenseId: r.id,
       conferido: false, createdBy: currentUser.name, createdByUid: currentUser.id,
     })).select().single();
     if (txErr) { setErrorBanner("Não consegui registrar a despesa: " + txErr.message); return false; }
@@ -3190,6 +3260,17 @@ export default function App() {
         parcelas_restantes: restantes, ativo: restantes > 0,
       }).eq("id", r.id);
       if (error) setErrorBanner("Despesa registrada, mas não consegui atualizar as parcelas: " + error.message);
+    }
+    setErrorBanner(""); return true;
+  };
+  const desfazerBaixaRecorrente = async (r, txBaixa) => {
+    if (!confirm(`Desfazer a baixa de "${r.descricao}"? Isso remove o lançamento e devolve o dinheiro pra conta.`)) return false;
+    const { error: delErr } = await supabase.from("transactions").delete().eq("id", txBaixa.id);
+    if (delErr) { setErrorBanner("Não consegui desfazer a baixa: " + delErr.message); return false; }
+    if (r.tipo_recorrencia === "parcelada") {
+      const restantes = (r.parcelas_restantes || 0) + 1;
+      const { error } = await supabase.from("recurring_expenses").update({ parcelas_restantes: restantes, ativo: true }).eq("id", r.id);
+      if (error) setErrorBanner("Baixa desfeita, mas não consegui atualizar as parcelas: " + error.message);
     }
     setErrorBanner(""); return true;
   };
@@ -3388,7 +3469,7 @@ export default function App() {
           {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} />}
           {tab === "reembolsos" && <ReembolsosView engine={engine} onPagar={(r) => setModal({ kind: "reembolso", reembolso: r })} />}
           {tab === "emprestimos" && <EmprestimosView engine={engine} onPagar={(e) => setModal({ kind: "pagar-emprestimo", emprestimo: e })} />}
-          {tab === "despesas-fixas" && <DespesasFixasView recurringExpenses={recurringExpenses} transactions={transactions} accounts={accounts} categories={categories} canManage={role.canLancar} onAdd={addRecurringExpense} onToggleAtivo={toggleRecurringExpenseAtivo} onDarBaixa={darBaixaRecorrente} />}
+          {tab === "despesas-fixas" && <DespesasFixasView recurringExpenses={recurringExpenses} transactions={transactions} accounts={accounts} categories={categories} canManage={role.canLancar} onAdd={addRecurringExpense} onToggleAtivo={toggleRecurringExpenseAtivo} onDarBaixa={darBaixaRecorrente} onDesfazerBaixa={desfazerBaixaRecorrente} />}
           {tab === "cartao" && <CartaoView transactions={transactions} accounts={accounts} />}
           {tab === "aprovacoes" && <AprovacoesView pendingEdits={pendingEdits} transactions={transactions} isAdmin={role.isAdmin} onApprove={approvePendingEdit} onReject={rejectPendingEdit} />}
           {tab === "despesas-previstas" && <DespesasPrevistasView despesasPrevistas={despesasPrevistas} accounts={accounts} categories={categories} canManage={role.canLancar} onAdd={addDespesaPrevista} onMarcarPaga={marcarDespesaComoPaga} onEditDespesa={editDespesaPrevista} />}
