@@ -1605,10 +1605,23 @@ function LiberarBloqueioModal({ nota, accounts, onClose, onSave }) {
   );
 }
 
+const MES_NOMES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const fmtMesAno = (ym) => { const [y, m] = ym.split("-"); return `${MES_NOMES[parseInt(m, 10) - 1]} ${y}`; };
+
 function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcarRecebido, onLiberarBloqueio }) {
   const [modal, setModal] = useState(null);
-  const aReceber = contasReceber.filter((n) => n.status !== "recebido").sort((a, b) => (a.data_prevista_recebimento || "").localeCompare(b.data_prevista_recebimento || ""));
-  const recebidas = contasReceber.filter((n) => n.status === "recebido").sort((a, b) => (b.data_efetiva_recebimento || "").localeCompare(a.data_efetiva_recebimento || ""));
+  const [filtroMes, setFiltroMes] = useState(todayISO().slice(0, 7));
+
+  const mesesDisponiveis = Array.from(new Set(
+    contasReceber.map((n) => (n.status === "recebido" ? n.data_efetiva_recebimento : n.data_prevista_recebimento) || "").filter(Boolean).map((d) => d.slice(0, 7))
+  )).sort();
+  if (filtroMes && !mesesDisponiveis.includes(filtroMes)) mesesDisponiveis.push(filtroMes);
+  mesesDisponiveis.sort();
+
+  const noMes = (data) => !filtroMes || (data || "").slice(0, 7) === filtroMes;
+
+  const aReceber = contasReceber.filter((n) => n.status !== "recebido" && noMes(n.data_prevista_recebimento)).sort((a, b) => (a.data_prevista_recebimento || "").localeCompare(b.data_prevista_recebimento || ""));
+  const recebidas = contasReceber.filter((n) => n.status === "recebido" && noMes(n.data_efetiva_recebimento)).sort((a, b) => (b.data_efetiva_recebimento || "").localeCompare(a.data_efetiva_recebimento || ""));
 
   const totais = {
     previsto: aReceber.reduce((s, n) => s + n.valor, 0),
@@ -1617,13 +1630,21 @@ function ContasReceberView({ contasReceber, accounts, canManage, onAdd, onMarcar
     bloqueado: recebidas.reduce((s, n) => s + (n.valor_bloqueado || 0), 0),
     disponivel: recebidas.reduce((s, n) => s + ((n.valor_recebido || n.valor) - (n.valor_bloqueado || 0)), 0),
   };
-  const totalGeral = contasReceber.reduce((s, n) => s + n.valor, 0);
+  const totalGeral = aReceber.reduce((s, n) => s + n.valor, 0) + recebidas.reduce((s, n) => s + n.valor, 0);
   const percentRecebido = totalGeral > 0 ? (totais.recebido / totalGeral) * 100 : 0;
 
   return (
     <div className="space-y-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="font-semibold fin-display text-lg">Contas a Receber</p>
+        <Select value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)} className="w-auto">
+          <option value="">Todos os meses</option>
+          {mesesDisponiveis.map((ym) => <option key={ym} value={ym}>{fmtMesAno(ym)}</option>)}
+        </Select>
+      </div>
+
       <Card style={{ background: "var(--navy)", border: "none" }} className="text-white">
-        <p className="text-xs uppercase tracking-wide mb-2" style={{ color: "var(--gold-soft)" }}>Resumo do mês</p>
+        <p className="text-xs uppercase tracking-wide mb-2" style={{ color: "var(--gold-soft)" }}>{filtroMes ? `Resumo de ${fmtMesAno(filtroMes)}` : "Resumo — todos os meses"}</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div><p className="text-xs" style={{ color: "#C7CEDC" }}>Total previsto</p><p className="fin-mono font-semibold text-lg">{fmtBRL(totalGeral)}</p></div>
           <div><p className="text-xs" style={{ color: "#C7CEDC" }}>Total recebido</p><p className="fin-mono font-semibold text-lg">{fmtBRL(totais.recebido)}</p></div>
