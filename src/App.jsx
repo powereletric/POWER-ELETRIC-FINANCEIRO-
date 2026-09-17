@@ -1107,7 +1107,7 @@ function FluxoCaixaView({ transactions, accounts, categories, onToggleConferido,
    igual o extrato do banco), pra bater linha por linha. Não edita nada aqui —
    pra corrigir um lançamento, usar a aba Fluxo de caixa.
    ============================================================ */
-function ExtratoBancarioView({ transactions, accounts }) {
+function ExtratoBancarioView({ transactions, accounts, onToggleConferido }) {
   const contasBanco = accounts.filter((a) => a.tipo !== "cartao_credito");
   const [contaId, setContaId] = useState(() => {
     const ativa = contasBanco.find((a) => a.active) || contasBanco[0];
@@ -1186,13 +1186,13 @@ function ExtratoBancarioView({ transactions, accounts }) {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
-                {["Data", "Descrição", "Categoria", "Entrada", "Saída", "Saldo"].map((h) => (
+                {["Data", "Descrição", "Categoria", "Entrada", "Saída", "Saldo", "Conf."].map((h) => (
                   <th key={h} className="text-left px-3 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtradas.length === 0 && <tr><td colSpan={6}><EmptyState text="Nenhum lançamento encontrado pra essa conta no período." /></td></tr>}
+              {filtradas.length === 0 && <tr><td colSpan={7}><EmptyState text="Nenhum lançamento encontrado pra essa conta no período." /></td></tr>}
               {filtradas.map((t) => (
                 <tr key={t.id} className="border-t" style={{ borderColor: "var(--line)" }}>
                   <td className="px-3 py-2 whitespace-nowrap fin-mono text-xs">{fmtDate(t.date)}</td>
@@ -1207,6 +1207,11 @@ function ExtratoBancarioView({ transactions, accounts }) {
                   <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--green)" }}>{t.entrada ? fmtBRL(t.entrada) : ""}</td>
                   <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--red)" }}>{t.saida ? fmtBRL(t.saida) : ""}</td>
                   <td className="px-3 py-2 fin-mono text-xs font-semibold whitespace-nowrap">{fmtBRL(t.saldo)}</td>
+                  <td className="px-3 py-2 text-center">
+                    <button onClick={() => onToggleConferido(t)} className="fin-focus" title={t.conferido ? "Conferido — clique pra desmarcar" : "Marcar como conferido"}>
+                      {t.conferido ? <Check size={16} style={{ color: "var(--green)" }} /> : <Clock size={16} style={{ color: "var(--ink-soft)" }} />}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -4105,7 +4110,7 @@ export default function App() {
 
           {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} categories={categories} despesasPrevistas={despesasPrevistas} contasReceber={contasReceber} recurringExpenses={recurringExpenses} />}
           {tab === "fluxo" && <FluxoCaixaView transactions={transactions} accounts={accounts} categories={categories} onToggleConferido={toggleConferido} onDelete={deleteTransaction} onEdit={(t) => setModal({ kind: "edit-tx", tx: t })} canDelete={role.canDelete} />}
-          {tab === "extrato-bancario" && <ExtratoBancarioView transactions={transactions} accounts={accounts} />}
+          {tab === "extrato-bancario" && <ExtratoBancarioView transactions={transactions} accounts={accounts} onToggleConferido={toggleConferido} />}
           {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} onExcluir={deleteTransaction} canDelete={role.canDelete} />}
           {tab === "reembolsos" && <ReembolsosView engine={engine} onPagar={(r) => setModal({ kind: "reembolso", reembolso: r })} />}
           {tab === "emprestimos" && <EmprestimosView engine={engine} onPagar={(e) => setModal({ kind: "pagar-emprestimo", emprestimo: e })} />}
