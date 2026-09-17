@@ -955,22 +955,45 @@ function FluxoCaixaView({ transactions, accounts, categories, onToggleConferido,
   // saldo acumulado do controle novo (a partir de 01/09), pra bater com o card do Dashboard.
   // No modo histórico, calcula à parte a partir de zero — é só pra consulta, não representa saldo real de caixa.
   const saldoAcumuladoPorId = useMemo(() => {
-    const inicio = verHistorico ? 0 : accounts.reduce((s, a) => s + (a.saldoInicial || 0), 0);
-    const base = verHistorico ? transactions.filter((t) => (t.date || "") < CORTE_HISTORICO) : transactions.filter((t) => (t.date || "") >= CORTE_HISTORICO);
+    // Quando uma conta específica está selecionada no filtro, o saldo mostrado
+    // passa a ser o saldo REAL daquela conta (o que bate com o extrato do banco),
+    // em vez do total consolidado de todas as contas da empresa.
+    const contaEspecifica = accountFilter !== "todas" ? accountFilter : null;
+    const inicio = verHistorico
+      ? 0
+      : contaEspecifica
+        ? (accounts.find((a) => a.id === contaEspecifica)?.saldoInicial || 0)
+        : accounts.reduce((s, a) => s + (a.saldoInicial || 0), 0);
+    const baseDate = verHistorico ? transactions.filter((t) => (t.date || "") < CORTE_HISTORICO) : transactions.filter((t) => (t.date || "") >= CORTE_HISTORICO);
+    const base = contaEspecifica
+      ? baseDate.filter((t) => [t.conta, t.contaOrigem, t.contaDestino].includes(contaEspecifica))
+      : baseDate;
     const chron = [...base].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || "").localeCompare(b.createdAt || ""));
     let acc = inicio;
     const map = {};
     chron.forEach((t) => {
-      if (t.type === "receita") acc += t.valor;
-      else if (t.type === "despesa" && !t.pendenteReembolso) acc -= t.valor;
-      else if (t.type === "adiantamento") acc -= t.valor;
-      else if (t.type === "devolucao_adiantamento") acc += t.valor;
-      else if (t.type === "reembolso_pagamento") acc -= t.valor;
-      else if (t.type === "ajuste") acc += t.valor;
+      if (contaEspecifica) {
+        if (t.type === "receita" && t.conta === contaEspecifica) acc += t.valor;
+        else if (t.type === "despesa" && t.conta === contaEspecifica && !t.pendenteReembolso) acc -= t.valor;
+        else if (t.type === "transferencia") {
+          if (t.contaOrigem === contaEspecifica) acc -= t.valor;
+          if (t.contaDestino === contaEspecifica) acc += t.valor;
+        } else if (t.type === "adiantamento" && t.conta === contaEspecifica) acc -= t.valor;
+        else if (t.type === "devolucao_adiantamento" && t.conta === contaEspecifica) acc += t.valor;
+        else if (t.type === "reembolso_pagamento" && t.conta === contaEspecifica) acc -= t.valor;
+        else if (t.type === "ajuste" && t.conta === contaEspecifica) acc += t.valor;
+      } else {
+        if (t.type === "receita") acc += t.valor;
+        else if (t.type === "despesa" && !t.pendenteReembolso) acc -= t.valor;
+        else if (t.type === "adiantamento") acc -= t.valor;
+        else if (t.type === "devolucao_adiantamento") acc += t.valor;
+        else if (t.type === "reembolso_pagamento") acc -= t.valor;
+        else if (t.type === "ajuste") acc += t.valor;
+      }
       map[t.id] = acc;
     });
     return map;
-  }, [transactions, accounts, verHistorico]);
+  }, [transactions, accounts, verHistorico, accountFilter]);
 
   const sorted = [...transactions].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
   const filtered = sorted.filter((t) => {
@@ -1070,6 +1093,112 @@ function FluxoCaixaView({ transactions, accounts, categories, onToggleConferido,
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
+   VIEW: EXTRATO BANCÁRIO (só consulta — pra conferir com o extrato real do banco)
+   Mostra o saldo de UMA conta por vez, em ordem cronológica (mais antigo primeiro,
+   igual o extrato do banco), pra bater linha por linha. Não edita nada aqui —
+   pra corrigir um lançamento, usar a aba Fluxo de caixa.
+   ============================================================ */
+function ExtratoBancarioView({ transactions, accounts }) {
+  const contasBanco = accounts.filter((a) => a.tipo !== "cartao_credito");
+  const [contaId, setContaId] = useState(() => {
+    const ativa = contasBanco.find((a) => a.active) || contasBanco[0];
+    return ativa?.id || "";
+  });
+  const [dataInicial, setDataInicial] = useState("");
+  const [dataFinal, setDataFinal] = useState("");
+
+  const conta = accounts.find((a) => a.id === contaId);
+
+  const linhas = useMemo(() => {
+    if (!contaId) return [];
+    const base = transactions.filter((t) => [t.conta, t.contaOrigem, t.contaDestino].includes(contaId));
+    const chron = [...base].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || "").localeCompare(b.createdAt || ""));
+    let acc = conta?.saldoInicial || 0;
+    return chron.map((t) => {
+      let entrada = 0, saida = 0;
+      if (t.type === "receita" && t.conta === contaId) { entrada = t.valor; acc += t.valor; }
+      else if (t.type === "despesa" && t.conta === contaId && !t.pendenteReembolso) { saida = t.valor; acc -= t.valor; }
+      else if (t.type === "transferencia") {
+        if (t.contaOrigem === contaId) { saida = t.valor; acc -= t.valor; }
+        if (t.contaDestino === contaId) { entrada = t.valor; acc += t.valor; }
+      } else if (t.type === "adiantamento" && t.conta === contaId) { saida = t.valor; acc -= t.valor; }
+      else if (t.type === "devolucao_adiantamento" && t.conta === contaId) { entrada = t.valor; acc += t.valor; }
+      else if (t.type === "reembolso_pagamento" && t.conta === contaId) { saida = t.valor; acc -= t.valor; }
+      else if (t.type === "ajuste" && t.conta === contaId) { entrada = t.valor; acc += t.valor; }
+      return { ...t, entrada, saida, saldo: acc };
+    });
+  }, [transactions, contaId, conta]);
+
+  const filtradas = linhas.filter((t) => {
+    if (dataInicial && (t.date || "") < dataInicial) return false;
+    if (dataFinal && (t.date || "") > dataFinal) return false;
+    return true;
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card style={{ background: "var(--teal-soft)", border: "none" }}>
+        <p className="text-sm">
+          📄 Extrato de uma conta só, em ordem cronológica — igual o extrato do banco, pra você conferir dia a dia.
+          Essa tela é só de consulta; pra corrigir algo, edite pela aba <b>Fluxo de caixa</b>.
+        </p>
+      </Card>
+      <div className="flex flex-wrap gap-2 items-end">
+        <Field label="Conta">
+          <Select value={contaId} onChange={(e) => setContaId(e.target.value)} style={{ width: 220 }}>
+            {contasBanco.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="De"><TextInput type="date" value={dataInicial} onChange={(e) => setDataInicial(e.target.value)} style={{ width: 150 }} /></Field>
+        <Field label="Até"><TextInput type="date" value={dataFinal} onChange={(e) => setDataFinal(e.target.value)} style={{ width: 150 }} /></Field>
+      </div>
+
+      <Card className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-xs" style={{ color: "var(--ink-soft)" }}>Saldo inicial da conta</p>
+          <p className="fin-mono font-semibold">{fmtBRL(conta?.saldoInicial || 0)}</p>
+        </div>
+        <div>
+          <p className="text-xs" style={{ color: "var(--ink-soft)" }}>Saldo atual (última linha do extrato)</p>
+          <p className="fin-mono font-semibold text-lg">{fmtBRL(filtradas.length ? filtradas[filtradas.length - 1].saldo : (conta?.saldoInicial || 0))}</p>
+        </div>
+      </Card>
+
+      <Card className="p-0 overflow-hidden">
+        <div className="fin-scroll overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: "#F0ECE0", color: "var(--ink-soft)" }}>
+                {["Data", "Descrição", "Categoria", "Entrada", "Saída", "Saldo"].map((h) => (
+                  <th key={h} className="text-left px-3 py-2 font-medium text-xs whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtradas.length === 0 && <tr><td colSpan={6}><EmptyState text="Nenhum lançamento encontrado pra essa conta no período." /></td></tr>}
+              {filtradas.map((t) => (
+                <tr key={t.id} className="border-t" style={{ borderColor: "var(--line)" }}>
+                  <td className="px-3 py-2 whitespace-nowrap fin-mono text-xs">{fmtDate(t.date)}</td>
+                  <td className="px-3 py-2 max-w-[340px] truncate" title={t.descricao}>
+                    {t.descricao
+                      ? <>{t.descricao}{t.pessoa ? <span style={{ color: "var(--ink-soft)" }}> · {t.pessoa}</span> : ""}</>
+                      : (t.pessoa || <span style={{ color: "var(--ink-soft)" }}>—</span>)}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-xs">{t.categoria || "—"}</td>
+                  <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--green)" }}>{t.entrada ? fmtBRL(t.entrada) : ""}</td>
+                  <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--red)" }}>{t.saida ? fmtBRL(t.saida) : ""}</td>
+                  <td className="px-3 py-2 fin-mono text-xs font-semibold whitespace-nowrap">{fmtBRL(t.saldo)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -3351,6 +3480,7 @@ function ConfiguracoesView({ profiles, currentUser, onChangeRole }) {
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: Home },
   { key: "fluxo", label: "Fluxo de caixa", icon: ListChecks },
+  { key: "extrato-bancario", label: "Extrato Bancário", icon: Landmark },
   { key: "despesas-previstas", label: "Despesas Previstas", icon: TrendingDown },
   { key: "contas-receber", label: "Contas a Receber", icon: Wallet },
   { key: "despesas-fixas", label: "Despesas Fixas", icon: Clock },
@@ -3955,16 +4085,17 @@ export default function App() {
           <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold" style={{ background: "var(--gold-soft)", color: "var(--gold)" }}>{currentUser.name.slice(0, 2).toUpperCase()}</div>
         </div>
 
-        <div className={`p-4 md:p-7 mx-auto ${["fluxo", "folha", "pagamentos-abertos"].includes(tab) ? "max-w-full" : "max-w-6xl"}`}>
+        <div className={`p-4 md:p-7 mx-auto ${["fluxo", "extrato-bancario", "folha", "pagamentos-abertos"].includes(tab) ? "max-w-full" : "max-w-6xl"}`}>
           <div className="hidden md:flex items-center justify-between mb-6">
             <h1 className="fin-display text-2xl font-semibold">{navItems.find((n) => n.key === tab)?.label}</h1>
-            {role.canLancar && !["folha", "funcionarios", "horas-extras", "documentos-rh", "acordos", "dashboard-rh", "pagamentos-abertos", "config", "categorias"].includes(tab) && <Btn variant="gold" icon={Plus} onClick={() => openQuick("despesa")}>Novo lançamento</Btn>}
+            {role.canLancar && !["folha", "funcionarios", "horas-extras", "documentos-rh", "acordos", "dashboard-rh", "pagamentos-abertos", "config", "categorias", "extrato-bancario"].includes(tab) && <Btn variant="gold" icon={Plus} onClick={() => openQuick("despesa")}>Novo lançamento</Btn>}
           </div>
 
           {errorBanner && <Card className="mb-4" style={{ background: "var(--red-soft)", border: "none" }}><p className="text-sm" style={{ color: "var(--red)" }}>{errorBanner}</p></Card>}
 
           {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} categories={categories} despesasPrevistas={despesasPrevistas} contasReceber={contasReceber} recurringExpenses={recurringExpenses} />}
           {tab === "fluxo" && <FluxoCaixaView transactions={transactions} accounts={accounts} categories={categories} onToggleConferido={toggleConferido} onDelete={deleteTransaction} onEdit={(t) => setModal({ kind: "edit-tx", tx: t })} canDelete={role.canDelete} />}
+          {tab === "extrato-bancario" && <ExtratoBancarioView transactions={transactions} accounts={accounts} />}
           {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} onExcluir={deleteTransaction} canDelete={role.canDelete} />}
           {tab === "reembolsos" && <ReembolsosView engine={engine} onPagar={(r) => setModal({ kind: "reembolso", reembolso: r })} />}
           {tab === "emprestimos" && <EmprestimosView engine={engine} onPagar={(e) => setModal({ kind: "pagar-emprestimo", emprestimo: e })} />}
