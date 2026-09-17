@@ -1124,19 +1124,27 @@ function ExtratoBancarioView({ transactions, accounts }) {
     const chron = [...base].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || "").localeCompare(b.createdAt || ""));
     let acc = conta?.saldoInicial || 0;
     return chron.map((t) => {
-      let entrada = 0, saida = 0;
+      let entrada = 0, saida = 0, rotulo = null;
       if (t.type === "receita" && t.conta === contaId) { entrada = t.valor; acc += t.valor; }
       else if (t.type === "despesa" && t.conta === contaId && !t.pendenteReembolso) { saida = t.valor; acc -= t.valor; }
       else if (t.type === "transferencia") {
-        if (t.contaOrigem === contaId) { saida = t.valor; acc -= t.valor; }
-        if (t.contaDestino === contaId) { entrada = t.valor; acc += t.valor; }
+        if (t.contaOrigem === contaId) {
+          saida = t.valor; acc -= t.valor;
+          const destino = accounts.find((a) => a.id === t.contaDestino);
+          rotulo = `Transferência enviada → ${destino?.name || "conta desconhecida"}`;
+        }
+        if (t.contaDestino === contaId) {
+          entrada = t.valor; acc += t.valor;
+          const origem = accounts.find((a) => a.id === t.contaOrigem);
+          rotulo = `Transferência recebida ← ${origem?.name || "conta desconhecida"}`;
+        }
       } else if (t.type === "adiantamento" && t.conta === contaId) { saida = t.valor; acc -= t.valor; }
       else if (t.type === "devolucao_adiantamento" && t.conta === contaId) { entrada = t.valor; acc += t.valor; }
       else if (t.type === "reembolso_pagamento" && t.conta === contaId) { saida = t.valor; acc -= t.valor; }
       else if (t.type === "ajuste" && t.conta === contaId) { entrada = t.valor; acc += t.valor; }
-      return { ...t, entrada, saida, saldo: acc };
+      return { ...t, entrada, saida, saldo: acc, rotulo };
     });
-  }, [transactions, contaId, conta]);
+  }, [transactions, contaId, conta, accounts]);
 
   const filtradas = linhas.filter((t) => {
     if (dataInicial && (t.date || "") < dataInicial) return false;
@@ -1188,12 +1196,14 @@ function ExtratoBancarioView({ transactions, accounts }) {
               {filtradas.map((t) => (
                 <tr key={t.id} className="border-t" style={{ borderColor: "var(--line)" }}>
                   <td className="px-3 py-2 whitespace-nowrap fin-mono text-xs">{fmtDate(t.date)}</td>
-                  <td className="px-3 py-2 max-w-[340px] truncate" title={t.descricao}>
-                    {t.descricao
-                      ? <>{t.descricao}{t.pessoa ? <span style={{ color: "var(--ink-soft)" }}> · {t.pessoa}</span> : ""}</>
-                      : (t.pessoa || <span style={{ color: "var(--ink-soft)" }}>—</span>)}
+                  <td className="px-3 py-2 max-w-[340px] truncate" title={t.rotulo || t.descricao}>
+                    {t.rotulo
+                      ? <span style={{ color: "var(--teal)", fontWeight: 500 }}>{t.rotulo}</span>
+                      : t.descricao
+                        ? <>{t.descricao}{t.pessoa ? <span style={{ color: "var(--ink-soft)" }}> · {t.pessoa}</span> : ""}</>
+                        : (t.pessoa || <span style={{ color: "var(--ink-soft)" }}>—</span>)}
                   </td>
-                  <td className="px-3 py-2 whitespace-nowrap text-xs">{t.categoria || "—"}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-xs">{t.categoria || (t.type === "transferencia" ? "Transferência" : "—")}</td>
                   <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--green)" }}>{t.entrada ? fmtBRL(t.entrada) : ""}</td>
                   <td className="px-3 py-2 fin-mono text-xs" style={{ color: "var(--red)" }}>{t.saida ? fmtBRL(t.saida) : ""}</td>
                   <td className="px-3 py-2 fin-mono text-xs font-semibold whitespace-nowrap">{fmtBRL(t.saldo)}</td>
