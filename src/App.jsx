@@ -739,6 +739,9 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
   const periodTx = filterByPeriod(transactions, month, year);
   const totals = periodTotals(periodTx);
   const saldoInicialPeriodo = saldoNoInicioDoPeriodo(transactions, accounts, month, year);
+  const proximoMes = month === 12 ? 1 : month + 1;
+  const proximoAno = month === 12 ? year + 1 : year;
+  const saldoFinalPeriodo = saldoNoInicioDoPeriodo(transactions, accounts, proximoMes, proximoAno);
   const activeAccounts = accounts.filter((a) => a.active);
   const [drill, setDrill] = useState(null); // null | "receitas" | "despesas"
   const [drillCategoria, setDrillCategoria] = useState(null);
@@ -813,7 +816,7 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         <span className="text-sm capitalize" style={{ color: "var(--ink-soft)" }}>{monthLabel(month, year)}</span>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>📌 Saldo inicial do mês</p><Money v={saldoInicialPeriodo} tone={saldoInicialPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
         <button onClick={() => setDrill("receitas")} className="fin-btn fin-card fin-focus text-left rounded-xl" style={{ cursor: receitasPeriodo.length ? "pointer" : "default" }}>
           <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>💰 Recebido no mês</p><Money v={totals.receitas} tone="pos" size="lg" /></Card>
@@ -823,6 +826,7 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         </button>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🔄 Transferências internas</p><Money v={totals.transferencias} size="lg" /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>📈 Resultado do mês</p><Money v={totals.saldoPeriodo} tone={totals.saldoPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🏁 Saldo final do mês</p><Money v={saldoFinalPeriodo} tone={saldoFinalPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
       </div>
 
       {despesasPorCategoria.length > 0 && (
