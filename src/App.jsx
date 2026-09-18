@@ -4174,4 +4174,3 @@ export default function App() {
     </div>
   );
 }
-Adiciona saldo inicial no dashboard
