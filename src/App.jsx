@@ -148,6 +148,28 @@ function periodTotals(periodTx) {
   const transferencias = periodTx.filter((t) => t.type === "transferencia").reduce((s, t) => s + t.valor, 0);
   return { receitas, despesas, transferencias, saldoPeriodo: receitas - despesas };
 }
+/* Saldo consolidado no início do período selecionado (mesma lógica do useFinanceEngine,
+   mas parando um dia antes do 1º do mês) — usado só pra mostrar de onde o saldo do mês parte. */
+function saldoNoInicioDoPeriodo(transactions, accounts, month, year) {
+  const inicioPeriodo = `${year}-${String(month).padStart(2, "0")}-01`;
+  const atuais = transactions.filter((t) => (t.date || "") >= CORTE_HISTORICO && (t.date || "") < inicioPeriodo);
+  const byType = (t) => atuais.filter((x) => x.type === t);
+  const saldoPorConta = {};
+  accounts.forEach((a) => { saldoPorConta[a.id] = a.saldoInicial || 0; });
+  byType("receita").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) + t.valor; });
+  byType("despesa").forEach((t) => { if (!t.pendenteReembolso) saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) - t.valor; });
+  byType("transferencia").forEach((t) => {
+    saldoPorConta[t.contaOrigem] = (saldoPorConta[t.contaOrigem] || 0) - t.valor;
+    saldoPorConta[t.contaDestino] = (saldoPorConta[t.contaDestino] || 0) + t.valor;
+  });
+  byType("adiantamento").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) - t.valor; });
+  byType("devolucao_adiantamento").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) + t.valor; });
+  byType("reembolso_pagamento").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) - t.valor; });
+  byType("ajuste").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) + t.valor; });
+  byType("emprestimo_terceiro").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) + t.valor; });
+  byType("pagamento_emprestimo").forEach((t) => { saldoPorConta[t.conta] = (saldoPorConta[t.conta] || 0) - t.valor; });
+  return Object.values(saldoPorConta).reduce((s, v) => s + v, 0);
+}
 function categoryBreakdown(periodTx) {
   const map = {};
   periodTx.filter((t) => t.type === "despesa" || t.type === "baixa_adiantamento").forEach((t) => {
@@ -716,6 +738,7 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
   const [year, setYear] = useState(now.getFullYear());
   const periodTx = filterByPeriod(transactions, month, year);
   const totals = periodTotals(periodTx);
+  const saldoInicialPeriodo = saldoNoInicioDoPeriodo(transactions, accounts, month, year);
   const activeAccounts = accounts.filter((a) => a.active);
   const [drill, setDrill] = useState(null); // null | "receitas" | "despesas"
   const [drillCategoria, setDrillCategoria] = useState(null);
@@ -790,7 +813,8 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         <span className="text-sm capitalize" style={{ color: "var(--ink-soft)" }}>{monthLabel(month, year)}</span>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>📌 Saldo inicial do mês</p><Money v={saldoInicialPeriodo} tone={saldoInicialPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
         <button onClick={() => setDrill("receitas")} className="fin-btn fin-card fin-focus text-left rounded-xl" style={{ cursor: receitasPeriodo.length ? "pointer" : "default" }}>
           <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>💰 Recebido no mês</p><Money v={totals.receitas} tone="pos" size="lg" /></Card>
         </button>
@@ -798,7 +822,7 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
           <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>💸 Despesas do mês</p><Money v={totals.despesas} tone="neg" size="lg" /></Card>
         </button>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🔄 Transferências internas</p><Money v={totals.transferencias} size="lg" /></Card>
-        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>💵 Saldo do mês</p><Money v={totals.saldoPeriodo} tone={totals.saldoPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
+        <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>📈 Resultado do mês</p><Money v={totals.saldoPeriodo} tone={totals.saldoPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
       </div>
 
       {despesasPorCategoria.length > 0 && (
@@ -4150,3 +4174,4 @@ export default function App() {
     </div>
   );
 }
+Adiciona saldo inicial no dashboard
