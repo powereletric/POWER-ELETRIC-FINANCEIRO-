@@ -887,19 +887,31 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
       {drill === "despesas" && drillCategoria && (
         <Modal title={drillCategoria} onClose={() => setDrillCategoria(null)} wide>
           <div className="divide-y" style={{ borderColor: "var(--line)" }}>
-            {despesasPeriodo.filter((t) => (t.categoria || "Outros") === drillCategoria)
-              .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
-              .map((t) => (
-                <div key={t.id} className="py-2.5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">{t.descricao ? (t.descricao + (t.pessoa ? ` · ${t.pessoa}` : "")) : (t.pessoa || "—")}</p>
-                    <Money v={t.valor} tone="neg" size="sm" />
+            {(() => {
+              const categoriaSigilosa = (drillCategoria || "").toUpperCase().includes("ADIANTAMENTO");
+              return despesasPeriodo.filter((t) => (t.categoria || "Outros") === drillCategoria)
+                .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+                .map((t) => (
+                  <div key={t.id} className="py-2.5">
+                    {categoriaSigilosa ? (
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium">{fmtDate(t.date)} · {accName(accounts, t.conta)}</p>
+                        <Money v={t.valor} tone="neg" size="sm" />
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium">{t.descricao ? (t.descricao + (t.pessoa ? ` · ${t.pessoa}` : "")) : (t.pessoa || "—")}</p>
+                          <Money v={t.valor} tone="neg" size="sm" />
+                        </div>
+                        <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
+                          {fmtDate(t.date)} · {accName(accounts, t.conta)}{t.documento ? ` · Doc. ${t.documento}` : ""}
+                        </p>
+                      </>
+                    )}
                   </div>
-                  <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
-                    {fmtDate(t.date)} · {accName(accounts, t.conta)}{t.documento ? ` · Doc. ${t.documento}` : ""}
-                  </p>
-                </div>
-              ))}
+                ));
+            })()}
           </div>
           <Btn variant="ghost" className="mt-3" onClick={() => setDrillCategoria(null)}>← Voltar às categorias</Btn>
         </Modal>
