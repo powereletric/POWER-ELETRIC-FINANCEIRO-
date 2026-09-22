@@ -888,12 +888,22 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         <Modal title={drillCategoria} onClose={() => setDrillCategoria(null)} wide>
           <div className="divide-y" style={{ borderColor: "var(--line)" }}>
             {(() => {
-              const categoriaSigilosa = (drillCategoria || "").toUpperCase().includes("ADIANTAMENTO");
+              const catUpper = (drillCategoria || "").toUpperCase();
+              const adiantamentoFuncionarios = catUpper === "ADIANTAMENTO SALARIAL";
+              const categoriaSigilosa = catUpper.includes("ADIANTAMENTO") && !adiantamentoFuncionarios;
               return despesasPeriodo.filter((t) => (t.categoria || "Outros") === drillCategoria)
                 .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
                 .map((t) => (
                   <div key={t.id} className="py-2.5">
-                    {categoriaSigilosa ? (
+                    {adiantamentoFuncionarios ? (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium">{t.pessoa || t.descricao || "—"}</p>
+                          <Money v={t.valor} tone="neg" size="sm" />
+                        </div>
+                        <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{fmtDate(t.date)} · {accName(accounts, t.conta)}</p>
+                      </>
+                    ) : categoriaSigilosa ? (
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-medium">{fmtDate(t.date)} · {accName(accounts, t.conta)}</p>
                         <Money v={t.valor} tone="neg" size="sm" />
