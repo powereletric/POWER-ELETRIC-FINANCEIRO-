@@ -1543,12 +1543,15 @@ const DP_STATUS_META = {
   atrasada: { label: "Em atraso", emoji: "🔴", tone: "red" },
 };
 
+const EMPRESAS = ["Power Eletric", "Power Equipamentos"];
+
 function NovaDespesaPrevistaModal({ categories, onClose, onSave }) {
   const [descricao, setDescricao] = useState("");
   const [categoria, setCategoria] = useState(categories[0]?.name || "");
   const [valor, setValor] = useState("");
   const [dataVencimento, setDataVencimento] = useState(todayISO());
   const [pessoa, setPessoa] = useState("");
+  const [empresa, setEmpresa] = useState(EMPRESAS[0]);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1558,7 +1561,7 @@ function NovaDespesaPrevistaModal({ categories, onClose, onSave }) {
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (!dataVencimento) { setErr("Informe a data de vencimento."); return; }
     setSaving(true);
-    const ok = await onSave({ descricao: descricao.trim(), categoria, valor_previsto: v, data_vencimento: dataVencimento, pessoa: pessoa.trim() });
+    const ok = await onSave({ descricao: descricao.trim(), categoria, valor_previsto: v, data_vencimento: dataVencimento, pessoa: pessoa.trim(), empresa });
     setSaving(false);
     if (!ok) setErr("Não consegui salvar. Tente novamente.");
   };
@@ -1572,6 +1575,7 @@ function NovaDespesaPrevistaModal({ categories, onClose, onSave }) {
       </div>
       <Field label="Categoria"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</Select></Field>
       <Field label="Pessoa / fornecedor"><TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} /></Field>
+      <Field label="Empresa"><Select value={empresa} onChange={(e) => setEmpresa(e.target.value)}>{EMPRESAS.map((x) => <option key={x} value={x}>{x}</option>)}</Select></Field>
       {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
       <div className="flex justify-end gap-2 mt-2">
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
@@ -1587,6 +1591,7 @@ function EditDespesaPrevistaModal({ despesa, categories, onClose, onSave }) {
   const [valor, setValor] = useState(String(despesa.valor_previsto ?? "").replace(".", ","));
   const [dataVencimento, setDataVencimento] = useState(despesa.data_vencimento || todayISO());
   const [pessoa, setPessoa] = useState(despesa.pessoa || "");
+  const [empresa, setEmpresa] = useState(despesa.empresa || EMPRESAS[0]);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1596,7 +1601,7 @@ function EditDespesaPrevistaModal({ despesa, categories, onClose, onSave }) {
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (!dataVencimento) { setErr("Informe a data de vencimento."); return; }
     setSaving(true);
-    const ok = await onSave(despesa, { descricao: descricao.trim(), categoria, valor_previsto: v, data_vencimento: dataVencimento, pessoa: pessoa.trim() });
+    const ok = await onSave(despesa, { descricao: descricao.trim(), categoria, valor_previsto: v, data_vencimento: dataVencimento, pessoa: pessoa.trim(), empresa });
     setSaving(false);
     if (!ok) setErr("Não consegui salvar. Tente novamente.");
   };
@@ -1610,6 +1615,7 @@ function EditDespesaPrevistaModal({ despesa, categories, onClose, onSave }) {
       </div>
       <Field label="Categoria"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</Select></Field>
       <Field label="Pessoa / fornecedor"><TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} /></Field>
+      <Field label="Empresa"><Select value={empresa} onChange={(e) => setEmpresa(e.target.value)}>{EMPRESAS.map((x) => <option key={x} value={x}>{x}</option>)}</Select></Field>
       {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
       <div className="flex justify-end gap-2 mt-2">
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
@@ -1656,7 +1662,10 @@ function MarcarPagaModal({ despesa, accounts, onClose, onSave }) {
 function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canManage, onAdd, onMarcarPaga, onEditDespesa }) {
   const [modal, setModal] = useState(null);
   const [filtroMes, setFiltroMes] = useState(todayISO().slice(0, 7));
-  const comStatus = despesasPrevistas.map((d) => ({ ...d, statusCalc: despesaPrevistaStatus(d) }));
+  const [filtroEmpresa, setFiltroEmpresa] = useState("");
+  const comStatus = despesasPrevistas
+    .filter((d) => !filtroEmpresa || (d.empresa || "") === filtroEmpresa)
+    .map((d) => ({ ...d, statusCalc: despesaPrevistaStatus(d) }));
 
   const mesesDisponiveis = Array.from(new Set(
     comStatus.map((d) => (d.statusCalc === "paga" ? d.data_pagamento : d.data_vencimento) || "").filter(Boolean).map((x) => x.slice(0, 7))
@@ -1673,15 +1682,23 @@ function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canMan
     atrasada: abertas.filter((d) => d.statusCalc === "atrasada").reduce((s, d) => s + d.valor_previsto, 0),
     paga: pagas.reduce((s, d) => s + (d.valor_pago || d.valor_previsto), 0),
   };
+  const abertoPorEmpresa = (emp) => abertas.filter((d) => (d.empresa || "") === emp).reduce((s, d) => s + Number(d.valor_previsto || 0), 0);
+  const empresaTag = (emp) => emp ? <Pill tone={emp === "Power Equipamentos" ? "neutral" : "teal"}>{emp === "Power Equipamentos" ? "🔧 Equipamentos" : "⚡ Eletric"}</Pill> : null;
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="font-semibold fin-display text-lg">Despesas Previstas</p>
-        <Select value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)} className="w-auto">
-          <option value="">Todos os meses</option>
-          {mesesDisponiveis.map((ym) => <option key={ym} value={ym}>{fmtMesAno(ym)}</option>)}
-        </Select>
+        <div className="flex gap-2 flex-wrap">
+          <Select value={filtroEmpresa} onChange={(e) => setFiltroEmpresa(e.target.value)} className="w-auto">
+            <option value="">Todas as empresas</option>
+            {EMPRESAS.map((x) => <option key={x} value={x}>{x}</option>)}
+          </Select>
+          <Select value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)} className="w-auto">
+            <option value="">Todos os meses</option>
+            {mesesDisponiveis.map((ym) => <option key={ym} value={ym}>{fmtMesAno(ym)}</option>)}
+          </Select>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1690,6 +1707,14 @@ function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canMan
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🟢 Pagas</p><Money v={totais.paga} /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>Total em aberto</p><Money v={totais.prevista + totais.atrasada} tone="neg" /></Card>
       </div>
+
+      {!filtroEmpresa && (
+        <div className="grid grid-cols-2 gap-3">
+          {EMPRESAS.map((emp) => (
+            <Card key={emp}><p className="text-xs" style={{ color: "var(--ink-soft)" }}>{emp === "Power Equipamentos" ? "🔧" : "⚡"} {emp} — em aberto</p><Money v={abertoPorEmpresa(emp)} tone="neg" /></Card>
+          ))}
+        </div>
+      )}
 
       {canManage && <Btn variant="gold" icon={Plus} onClick={() => setModal({ kind: "nova" })}>Nova despesa prevista</Btn>}
 
@@ -1702,7 +1727,7 @@ function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canMan
               return (
                 <div key={d.id} className="flex items-center justify-between px-4 py-3" style={{ borderTop: i ? "1px solid var(--line)" : "none" }}>
                   <div>
-                    <p className="text-sm font-medium">{meta.emoji} {d.descricao} <Pill tone={meta.tone}>{meta.label}</Pill></p>
+                    <p className="text-sm font-medium">{meta.emoji} {d.descricao} <Pill tone={meta.tone}>{meta.label}</Pill> {empresaTag(d.empresa)}</p>
                     <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{d.categoria || "—"} · vence {fmtDate(d.data_vencimento)}{d.pessoa ? ` · ${d.pessoa}` : ""}</p>
                   </div>
                   <div className="flex items-center gap-3">
@@ -1723,7 +1748,7 @@ function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canMan
           <Card className="p-0 overflow-hidden">
             {pagas.map((d, i) => (
               <div key={d.id} className="flex items-center justify-between px-4 py-2.5 text-sm" style={{ borderTop: i ? "1px solid var(--line)" : "none", opacity: 0.7 }}>
-                <span>🟢 {d.descricao} · pago em {fmtDate(d.data_pagamento)}</span>
+                <span>🟢 {d.descricao}{d.pessoa ? ` · ${d.pessoa}` : ""} · pago em {fmtDate(d.data_pagamento)} {empresaTag(d.empresa)}</span>
                 <Money v={d.valor_pago} size="sm" />
               </div>
             ))}
