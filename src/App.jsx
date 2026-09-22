@@ -889,7 +889,7 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
           <div className="divide-y" style={{ borderColor: "var(--line)" }}>
             {(() => {
               const catUpper = (drillCategoria || "").toUpperCase();
-              const adiantamentoFuncionarios = catUpper === "ADIANTAMENTO SALARIAL";
+              const adiantamentoFuncionarios = catUpper.startsWith("ADIANTAMENTO SALARIAL");
               const categoriaSigilosa = catUpper.includes("ADIANTAMENTO") && !adiantamentoFuncionarios;
               return despesasPeriodo.filter((t) => (t.categoria || "Outros") === drillCategoria)
                 .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
