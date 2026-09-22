@@ -1552,6 +1552,7 @@ function NovaDespesaPrevistaModal({ categories, onClose, onSave }) {
   const [dataVencimento, setDataVencimento] = useState(todayISO());
   const [pessoa, setPessoa] = useState("");
   const [empresa, setEmpresa] = useState(EMPRESAS[0]);
+  const [observacao, setObservacao] = useState("");
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1561,7 +1562,7 @@ function NovaDespesaPrevistaModal({ categories, onClose, onSave }) {
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (!dataVencimento) { setErr("Informe a data de vencimento."); return; }
     setSaving(true);
-    const ok = await onSave({ descricao: descricao.trim(), categoria, valor_previsto: v, data_vencimento: dataVencimento, pessoa: pessoa.trim(), empresa });
+    const ok = await onSave({ descricao: descricao.trim(), categoria, valor_previsto: v, data_vencimento: dataVencimento, pessoa: pessoa.trim(), empresa, observacao: observacao.trim() || null });
     setSaving(false);
     if (!ok) setErr("Não consegui salvar. Tente novamente.");
   };
@@ -1576,6 +1577,7 @@ function NovaDespesaPrevistaModal({ categories, onClose, onSave }) {
       <Field label="Categoria"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</Select></Field>
       <Field label="Pessoa / fornecedor"><TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} /></Field>
       <Field label="Empresa"><Select value={empresa} onChange={(e) => setEmpresa(e.target.value)}>{EMPRESAS.map((x) => <option key={x} value={x}>{x}</option>)}</Select></Field>
+      <Field label="Observação"><TextInput value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: inclui reembolso..." /></Field>
       {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
       <div className="flex justify-end gap-2 mt-2">
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
@@ -1592,6 +1594,7 @@ function EditDespesaPrevistaModal({ despesa, categories, onClose, onSave }) {
   const [dataVencimento, setDataVencimento] = useState(despesa.data_vencimento || todayISO());
   const [pessoa, setPessoa] = useState(despesa.pessoa || "");
   const [empresa, setEmpresa] = useState(despesa.empresa || EMPRESAS[0]);
+  const [observacao, setObservacao] = useState(despesa.observacao || "");
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -1601,7 +1604,7 @@ function EditDespesaPrevistaModal({ despesa, categories, onClose, onSave }) {
     if (!v || v <= 0) { setErr("Informe um valor válido."); return; }
     if (!dataVencimento) { setErr("Informe a data de vencimento."); return; }
     setSaving(true);
-    const ok = await onSave(despesa, { descricao: descricao.trim(), categoria, valor_previsto: v, data_vencimento: dataVencimento, pessoa: pessoa.trim(), empresa });
+    const ok = await onSave(despesa, { descricao: descricao.trim(), categoria, valor_previsto: v, data_vencimento: dataVencimento, pessoa: pessoa.trim(), empresa, observacao: observacao.trim() || null });
     setSaving(false);
     if (!ok) setErr("Não consegui salvar. Tente novamente.");
   };
@@ -1616,6 +1619,7 @@ function EditDespesaPrevistaModal({ despesa, categories, onClose, onSave }) {
       <Field label="Categoria"><Select value={categoria} onChange={(e) => setCategoria(e.target.value)}>{categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</Select></Field>
       <Field label="Pessoa / fornecedor"><TextInput value={pessoa} onChange={(e) => setPessoa(e.target.value)} /></Field>
       <Field label="Empresa"><Select value={empresa} onChange={(e) => setEmpresa(e.target.value)}>{EMPRESAS.map((x) => <option key={x} value={x}>{x}</option>)}</Select></Field>
+      <Field label="Observação"><TextInput value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: inclui reembolso..." /></Field>
       {err && <p className="text-sm mb-2" style={{ color: "var(--red)" }}>{err}</p>}
       <div className="flex justify-end gap-2 mt-2">
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>
@@ -1729,6 +1733,7 @@ function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canMan
                   <div>
                     <p className="text-sm font-medium">{meta.emoji} {d.descricao} <Pill tone={meta.tone}>{meta.label}</Pill> {empresaTag(d.empresa)}</p>
                     <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{d.categoria || "—"} · vence {fmtDate(d.data_vencimento)}{d.pessoa ? ` · ${d.pessoa}` : ""}</p>
+                    {d.observacao && <p className="text-xs mt-0.5" style={{ color: "var(--amber)" }}>📝 {d.observacao}</p>}
                   </div>
                   <div className="flex items-center gap-3">
                     <Money v={d.valor_previsto} size="sm" tone="neg" />
@@ -1748,7 +1753,7 @@ function DespesasPrevistasView({ despesasPrevistas, accounts, categories, canMan
           <Card className="p-0 overflow-hidden">
             {pagas.map((d, i) => (
               <div key={d.id} className="flex items-center justify-between px-4 py-2.5 text-sm" style={{ borderTop: i ? "1px solid var(--line)" : "none", opacity: 0.7 }}>
-                <span>🟢 {d.descricao}{d.pessoa ? ` · ${d.pessoa}` : ""} · pago em {fmtDate(d.data_pagamento)} {empresaTag(d.empresa)}</span>
+                <span>🟢 {d.descricao}{d.pessoa ? ` · ${d.pessoa}` : ""} · pago em {fmtDate(d.data_pagamento)} {empresaTag(d.empresa)}{d.observacao && <span className="block text-xs" style={{ color: "var(--amber)" }}>📝 {d.observacao}</span>}</span>
                 <Money v={d.valor_pago} size="sm" />
               </div>
             ))}
@@ -3809,7 +3814,7 @@ export default function App() {
     // cria a despesa real (mesma estrutura de sempre) e liga à previsão — não duplica se já foi marcada
     const { data: txRow, error: txErr } = await supabase.from("transactions").insert(toDb({
       type: "despesa", date: dataPagamento, valor: valorPago, conta, categoria: despesa.categoria,
-      pessoa: despesa.pessoa, descricao: despesa.descricao, conferido: false,
+      pessoa: despesa.pessoa, descricao: despesa.pessoa && !String(despesa.descricao || "").toUpperCase().includes(String(despesa.pessoa).toUpperCase()) ? `${despesa.descricao} - ${despesa.pessoa}` : despesa.descricao, observacao: despesa.observacao || "", conferido: false,
       createdBy: currentUser.name, createdByUid: currentUser.id,
     })).select().single();
     if (txErr) { setErrorBanner("Não consegui registrar o pagamento: " + txErr.message); return false; }
