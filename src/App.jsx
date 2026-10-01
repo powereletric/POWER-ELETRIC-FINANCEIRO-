@@ -942,40 +942,6 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         </Card>
       </div>
 
-      {(despesasPrevistas || contasReceber) && (
-        <div>
-          <p className="font-semibold mb-2 fin-display">📊 Previsão financeira — {monthLabel(month, year)}</p>
-          <Card style={{ background: "var(--navy)", border: "none" }} className="text-white">
-            {(() => {
-              const noMesSelecionado = (data) => (data || "").slice(0, 7) === `${year}-${String(month).padStart(2, "0")}`;
-              const saidasDespesasPrevistas = (despesasPrevistas || []).filter((d) => d.status !== "paga" && noMesSelecionado(d.data_vencimento)).reduce((s, d) => s + d.valor_previsto, 0);
-              const mesSelecionadoStr = `${year}-${String(month).padStart(2, "0")}`;
-              const baixasFixasDoMes = new Set(transactions.filter((t) => t.refRecurringExpenseId && (t.date || "").slice(0, 7) === mesSelecionadoStr).map((t) => t.refRecurringExpenseId));
-              const saidasFixasPendentes = (recurringExpenses || []).filter((r) => r.ativo && !baixasFixasDoMes.has(r.id)).reduce((s, r) => s + r.valor, 0);
-              const saidasPrevistas = saidasDespesasPrevistas + saidasFixasPendentes;
-              const entradasPrevistas = (contasReceber || []).filter((n) => n.status !== "recebido" && noMesSelecionado(n.data_prevista_recebimento)).reduce((s, n) => s + n.valor, 0);
-              const saldoProjetado = engine.saldoConsolidado + entradasPrevistas - saidasPrevistas;
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-xs" style={{ color: "var(--gold-soft)" }}>💰 Entradas previstas (a receber)</p>
-                    <p className="fin-mono font-semibold text-xl">{fmtBRL(entradasPrevistas)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs" style={{ color: "var(--gold-soft)" }}>💸 Saídas previstas (a pagar)</p>
-                    <p className="fin-mono font-semibold text-xl">{fmtBRL(saidasPrevistas)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs" style={{ color: "var(--gold-soft)" }}>💵 Saldo projetado</p>
-                    <p className="fin-mono font-semibold text-xl">{fmtBRL(saldoProjetado)}</p>
-                  </div>
-                </div>
-              );
-            })()}
-            <p className="text-xs mt-3" style={{ color: "#C7CEDC" }}>Previsto ainda não é realizado — o saldo bancário real só muda quando o dinheiro entra ou sai de fato.</p>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
