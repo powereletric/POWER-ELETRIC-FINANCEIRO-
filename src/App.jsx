@@ -832,7 +832,6 @@ function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDele
   };
 
   const quemDeve = acumulado >= 0 ? "Em haver do Gilmar" : "Em haver da Elisângela";
-  const difLabel = sel.diferenca >= 0 ? "Elisângela pegou a mais" : "Gilmar pegou a mais";
 
   return (
     <Card>
@@ -852,7 +851,7 @@ function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDele
           <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--ink-soft)" }}>Elisângela</p>
           <LinhaValor label="Salário de sócio" v={sel.elis.salario} />
           <LinhaValor label="Adiantamentos de pró-labore" v={sel.elis.adiantamentos} />
-          <LinhaValor label="Empregada Daniela (folha)" v={sel.elis.empregada} hint={selMes && !selMes.temEmpregada ? "· não lançada" : null} />
+          <LinhaValor label="Salário empregada Daniela" v={sel.elis.empregada} hint={selMes && !selMes.temEmpregada ? "· não lançada" : null} />
           <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total que pegou" v={sel.elis.total} bold /></div>
         </div>
         <div className="p-4">
@@ -863,8 +862,7 @@ function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDele
           <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total que pegou" v={sel.gil.total} bold /></div>
         </div>
         <div className="md:col-span-2 px-4 py-3" style={{ background: "var(--navy)", color: "#fff" }}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
-            <div><p className="text-xs" style={{ color: "var(--gold-soft)" }}>{difLabel}</p><p className="fin-mono font-semibold">{fmtBRL(Math.abs(sel.diferenca))}</p></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-end">
             <div><p className="text-xs" style={{ color: "var(--gold-soft)" }}>(+) Empresa deve ao Gilmar (aluguel + jurídico)</p><p className="fin-mono font-semibold">{fmtBRL(sel.creditos)}</p></div>
             <div className="md:text-right">
               <p className="text-xs" style={{ color: "var(--gold-soft)" }}>{periodo === "acumulado" ? quemDeve + " hoje" : `Em haver gerado em ${mesLabel(periodo).toLowerCase()}`}</p>
@@ -1036,8 +1034,6 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🏁 Saldo final do mês</p><Money v={saldoFinalPeriodo} tone={saldoFinalPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
       </div>
 
-      <SociosRetiradasCard extras={haverCreditos} transactions={transactions} canEdit={!role?.isSocio} onAddExtra={onAddHaver} onDeleteExtra={onDeleteHaver} />
-
       {despesasPorCategoria.length > 0 && (
         <div>
           <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Com o que a Power gastou este mês</p>
@@ -1150,6 +1146,8 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
           <p className="fin-mono text-2xl font-semibold">{transactions.filter((t) => !t.conferido).length}</p>
         </Card>
       </div>
+
+      <SociosRetiradasCard extras={haverCreditos} transactions={transactions} canEdit={!role?.isSocio} onAddExtra={onAddHaver} onDeleteExtra={onDeleteHaver} />
 
     </div>
   );
