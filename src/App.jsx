@@ -732,7 +732,168 @@ function resolveCategoryEmoji(categories, name) {
   return categoryEmoji(name);
 }
 const QUICK_EMOJIS = ["🍽️", "⛽", "🛣️", "👷", "🔧", "🧾", "🏛️", "👥", "↩️", "🚚", "🧰", "🏨", "⚖️", "📑", "🛠️", "💵", "✈️", "📂", "🏦", "💳", "🛒", "📦", "🧹", "🎓"];
-function DashboardView({ accounts, transactions, engine, onQuickAction, role, categories, despesasPrevistas, contasReceber, recurringExpenses }) {
+/* ============================================================
+   EM HAVER — GILMAR
+   A empresa deve ao Gilmar, todo mês a partir de out/2026:
+   salário da empregada (valor da folha) + aluguel do alojamento em
+   Telêmaco + reembolso jurídico Rafaela (tabela haver_gilmar_creditos).
+   Desconta o que ele pegou nas categorias abaixo, a partir de 01/10/2026.
+   O que sobra fica em haver e passa para o mês seguinte.
+   ============================================================ */
+const HAVER_INICIO = "2026-10-01";
+const HAVER_CATEGORIAS_ABATIMENTO = ["GILMAR - ADIANTAMENTO DE PROLABORE", "GILMAR - PAGAMENTO DE HAVER"];
+const HAVER_PRESETS = ["Salário empregada (folha)", "Aluguel alojamento Telêmaco", "Reembolso jurídico Rafaela"];
+const HAVER_FIXOS = [{ descricao: "Aluguel alojamento Telêmaco", valor: 1000 }, { descricao: "Reembolso jurídico Rafaela", valor: 1000 }];
+
+function haverMeses(creditos) {
+  // de out/2026 até o mês atual (ou o último mês com crédito lançado, se for depois)
+  const hoje = todayISO().slice(0, 7);
+  const ultimoCredito = (creditos || []).reduce((max, c) => ((c.competencia || "").slice(0, 7) > max ? c.competencia.slice(0, 7) : max), hoje);
+  const meses = [];
+  let [y, m] = HAVER_INICIO.slice(0, 7).split("-").map(Number);
+  while (true) {
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    meses.push(key);
+    if (key >= ultimoCredito) break;
+    m += 1; if (m > 12) { m = 1; y += 1; }
+  }
+  return meses;
+}
+
+function calcHaverGilmar(creditos, transactions) {
+  const abatimentos = (transactions || []).filter((t) =>
+    HAVER_CATEGORIAS_ABATIMENTO.includes((t.categoria || "").toUpperCase()) &&
+    (t.type === "despesa" || t.type === "baixa_adiantamento") &&
+    (t.date || "") >= HAVER_INICIO
+  );
+  let saldo = 0;
+  const linhas = haverMeses(creditos).map((mes) => {
+    const cred = (creditos || []).filter((c) => (c.competencia || "").slice(0, 7) === mes);
+    const abat = abatimentos.filter((t) => (t.date || "").slice(0, 7) === mes);
+    const totalCred = cred.reduce((s, c) => s + Number(c.valor), 0);
+    const totalAbat = abat.reduce((s, t) => s + Number(t.valor), 0);
+    const saldoAnterior = saldo;
+    saldo = saldoAnterior + totalCred - totalAbat;
+    return { mes, cred, abat, totalCred, totalAbat, saldoAnterior, saldo };
+  });
+  return { linhas, saldo };
+}
+
+function mesLabel(key) { const [y, m] = key.split("-").map(Number); const t = monthLabel(m, y); return t.charAt(0).toUpperCase() + t.slice(1); }
+
+function HaverGilmarCard({ creditos, transactions, canEdit, onAddCredito, onDeleteCredito }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(null);
+  const { linhas, saldo } = useMemo(() => calcHaverGilmar(creditos, transactions), [creditos, transactions]);
+  const mesAtual = todayISO().slice(0, 7);
+  const linhaAtual = linhas.find((l) => l.mes === mesAtual);
+  const fixosFaltando = HAVER_FIXOS.filter((f) => !(linhaAtual?.cred || []).some((c) => c.descricao === f.descricao));
+
+  const salvar = async () => {
+    const valor = parseValorBR(form.valor);
+    const descricao = form.descricao === "__outro" ? (form.outro || "").trim() : form.descricao;
+    if (!descricao || !(valor > 0)) { alert("Preencha a descrição e um valor maior que zero."); return; }
+    const ok = await onAddCredito([{ competencia: form.mes + "-01", descricao, valor }]);
+    if (ok) setForm(null);
+  };
+
+  const proximoMes = (() => { let [y, m] = mesAtual.split("-").map(Number); m += 1; if (m > 12) { m = 1; y += 1; } return `${y}-${String(m).padStart(2, "0")}`; })();
+  const opcoesMes = [...new Set([...linhas.map((l) => l.mes), proximoMes])];
+
+  return (
+    <>
+      <button onClick={() => setOpen(true)} className="fin-btn fin-card fin-focus text-left rounded-xl w-full">
+        <Card>
+          <div className="flex items-center gap-2 mb-1"><Handshake size={16} style={{ color: "var(--gold)" }} /><p className="text-xs font-medium" style={{ color: "var(--ink-soft)" }}>Em haver — Gilmar</p></div>
+          <Money v={saldo} tone={saldo >= 0 ? undefined : "neg"} />
+          <p className="text-xs mt-1" style={{ color: "var(--ink-soft)" }}>{saldo >= 0 ? "a empresa deve a ele" : "ele pegou a mais"} · desde out/2026</p>
+        </Card>
+      </button>
+
+      {open && (
+        <Modal title="Em haver — Gilmar" onClose={() => { setOpen(false); setForm(null); }} wide>
+          <p className="text-xs mb-4" style={{ color: "var(--ink-soft)" }}>
+            Todo mês a empresa deve ao Gilmar o salário da empregada (valor da folha), o aluguel do alojamento em Telêmaco e o reembolso jurídico Rafaela.
+            Desconta o que ele pegou como adiantamento de pró-labore ou como pagamento do haver. O que sobra passa para o mês seguinte.
+          </p>
+
+          <div className="rounded-xl p-4 mb-4" style={{ background: "var(--navy)", color: "#fff" }}>
+            <p className="text-xs uppercase tracking-wide" style={{ color: "var(--gold-soft)" }}>Saldo em haver hoje</p>
+            <p className="fin-mono fin-display font-semibold" style={{ fontSize: 30 }}>{fmtBRL(saldo)}</p>
+          </div>
+
+          {canEdit && fixosFaltando.length > 0 && (
+            <div className="flex items-center justify-between gap-2 rounded-lg p-3 mb-4" style={{ background: "var(--amber-soft)" }}>
+              <p className="text-sm">Faltam os fixos de {mesLabel(mesAtual)}: {fixosFaltando.map((f) => f.descricao).join(" e ")}.</p>
+              <Btn variant="gold" onClick={() => onAddCredito(fixosFaltando.map((f) => ({ competencia: mesAtual + "-01", ...f })))}>Lançar</Btn>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {[...linhas].reverse().map((l) => {
+              const temEmpregada = l.cred.some((c) => c.descricao.toUpperCase().includes("EMPREGADA"));
+              return (
+                <div key={l.mes} className="rounded-xl p-3" style={{ border: "1px solid var(--line)" }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-semibold">{mesLabel(l.mes)}</p>
+                    {!temEmpregada && <Pill tone="amber">empregada ainda não lançada</Pill>}
+                  </div>
+                  <div className="text-sm divide-y" style={{ borderColor: "var(--line)" }}>
+                    <div className="flex justify-between py-1.5" style={{ color: "var(--ink-soft)" }}><span>Saldo do mês anterior</span><span className="fin-mono">{fmtBRL(l.saldoAnterior)}</span></div>
+                    {l.cred.map((c) => (
+                      <div key={c.id} className="flex justify-between items-center py-1.5">
+                        <span>(+) {c.descricao}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="fin-mono" style={{ color: "var(--green)" }}>{fmtBRL(Number(c.valor))}</span>
+                          {canEdit && <button title="Excluir" onClick={() => { if (confirm(`Excluir "${c.descricao}" de ${mesLabel(l.mes)}?`)) onDeleteCredito(c.id); }} className="fin-focus p-0.5" style={{ color: "var(--ink-soft)" }}><Trash2 size={13} /></button>}
+                        </span>
+                      </div>
+                    ))}
+                    {l.abat.map((t) => (
+                      <div key={t.id} className="flex justify-between py-1.5">
+                        <span>(−) {(t.categoria || "").toUpperCase() === "GILMAR - PAGAMENTO DE HAVER" ? "Pagamento do haver" : "Adiantamento de pró-labore"} · {fmtDate(t.date)}</span>
+                        <span className="fin-mono" style={{ color: "var(--red)" }}>{fmtBRL(Number(t.valor))}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between py-1.5 font-semibold"><span>Saldo em haver no fim do mês</span><span className="fin-mono">{fmtBRL(l.saldo)}</span></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {canEdit && (form ? (
+            <div className="rounded-xl p-3 mt-4" style={{ border: "1px solid var(--line)" }}>
+              <p className="font-semibold mb-2">Novo crédito para o Gilmar</p>
+              <Field label="Mês" required>
+                <Select value={form.mes} onChange={(e) => setForm({ ...form, mes: e.target.value })}>
+                  {opcoesMes.map((m) => <option key={m} value={m}>{mesLabel(m)}</option>)}
+                </Select>
+              </Field>
+              <Field label="O que é" required>
+                <Select value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })}>
+                  {HAVER_PRESETS.map((p) => <option key={p} value={p}>{p}</option>)}
+                  <option value="__outro">Outro…</option>
+                </Select>
+              </Field>
+              {form.descricao === "__outro" && <Field label="Descrição" required><TextInput value={form.outro || ""} onChange={(e) => setForm({ ...form, outro: e.target.value })} /></Field>}
+              <Field label="Valor (R$)" required><TextInput inputMode="decimal" placeholder="Ex: 2.565,46" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} /></Field>
+              <div className="flex gap-2"><Btn onClick={salvar} icon={Check}>Salvar</Btn><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn></div>
+            </div>
+          ) : (
+            <Btn className="mt-4" icon={Plus} onClick={() => setForm({ mes: mesAtual, descricao: HAVER_PRESETS[0], valor: "" })}>Adicionar crédito</Btn>
+          ))}
+
+          <p className="text-xs mt-4" style={{ color: "var(--ink-soft)" }}>
+            Para registrar quando a empresa pagar o haver ao Gilmar, lance uma despesa na categoria <b>GILMAR - PAGAMENTO DE HAVER</b>. Ela entra aqui como desconto automaticamente.
+          </p>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function DashboardView({ accounts, transactions, engine, onQuickAction, role, categories, despesasPrevistas, contasReceber, recurringExpenses, haverCreditos, onAddHaver, onDeleteHaver }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -927,7 +1088,8 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         </Modal>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <HaverGilmarCard creditos={haverCreditos} transactions={transactions} canEdit={!role?.isSocio} onAddCredito={onAddHaver} onDeleteCredito={onDeleteHaver} />
         <Card>
           <div className="flex items-center gap-2 mb-1"><AlertCircle size={16} style={{ color: "var(--red)" }} /><p className="text-xs font-medium" style={{ color: "var(--ink-soft)" }}>Reembolsos pendentes</p></div>
           <Money v={engine.totalReembolsosPendentes} tone="neg" />
@@ -3595,6 +3757,7 @@ export default function App() {
   const [agreements, setAgreements] = useState([]);
   const [agreementInstallments, setAgreementInstallments] = useState([]);
   const [pendingEdits, setPendingEdits] = useState([]);
+  const [haverCreditos, setHaverCreditos] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [modal, setModal] = useState(null);
@@ -3616,7 +3779,7 @@ export default function App() {
 
     async function loadAll() {
       setDataLoading(true);
-      const [{ data: profileRows }, { data: accountRows }, { data: categoryRows }, { data: txRows }, { data: despesasPrevistasRows }, { data: contasReceberRows }, { data: recurringRows }, { data: pendingEditsRows }, { data: employeeRows }, { data: payrollRows }, { data: payrollPaymentRows }, { data: overtimeRows }, { data: hrDocTypeRows }, { data: hrDocRows }, { data: agreementRows }, { data: installmentRows }] = await Promise.all([
+      const [{ data: profileRows }, { data: accountRows }, { data: categoryRows }, { data: txRows }, { data: despesasPrevistasRows }, { data: contasReceberRows }, { data: recurringRows }, { data: pendingEditsRows }, { data: employeeRows }, { data: payrollRows }, { data: payrollPaymentRows }, { data: overtimeRows }, { data: hrDocTypeRows }, { data: hrDocRows }, { data: agreementRows }, { data: installmentRows }, { data: haverRows }] = await Promise.all([
         supabase.from("profiles").select("*").order("name"),
         supabase.from("accounts").select("*").order("created_at"),
         supabase.from("categories").select("*").order("name"),
@@ -3633,6 +3796,7 @@ export default function App() {
         supabase.from("hr_documents").select("*"),
         supabase.from("agreements").select("*"),
         supabase.from("agreement_installments").select("*"),
+        supabase.from("haver_gilmar_creditos").select("*").order("competencia"),
       ]);
       if (cancelled) return;
       setProfiles(profileRows || []);
@@ -3653,6 +3817,7 @@ export default function App() {
       setHrDocuments(hrDocRows || []);
       setAgreements((agreementRows || []).map((a) => ({ ...a, valor_total: Number(a.valor_total), valor_parcela: Number(a.valor_parcela) })));
       setAgreementInstallments((installmentRows || []).map((p) => ({ ...p, valor: Number(p.valor), valor_pago: Number(p.valor_pago) })));
+      setHaverCreditos(haverRows || []);
       setDataLoading(false);
     }
     loadAll();
@@ -3675,6 +3840,7 @@ export default function App() {
       .on("postgres_changes", { event: "*", schema: "public", table: "hr_documents" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "agreements" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "agreement_installments" }, () => loadAll())
+      .on("postgres_changes", { event: "*", schema: "public", table: "haver_gilmar_creditos" }, () => loadAll())
       .subscribe();
     channelRef.current = channel;
 
@@ -3752,6 +3918,15 @@ export default function App() {
     }).eq("id", pe.id);
     if (error) { setErrorBanner("Não consegui rejeitar: " + error.message); return false; }
     setErrorBanner(""); return true;
+  };
+  const addHaverCredito = async (rows) => {
+    const { error } = await supabase.from("haver_gilmar_creditos").insert(rows.map((r) => ({ ...r, created_by: currentUser?.id })));
+    if (error) { setErrorBanner("Não consegui salvar o crédito do Gilmar: " + error.message); return false; }
+    setErrorBanner(""); return true;
+  };
+  const deleteHaverCredito = async (id) => {
+    const { error } = await supabase.from("haver_gilmar_creditos").delete().eq("id", id);
+    if (error) setErrorBanner("Não consegui excluir o crédito: " + error.message);
   };
   const addAccount = async (a) => {
     const { error } = await supabase.from("accounts").insert({ name: a.name, active: a.active, saldo_inicial: a.saldoInicial });
@@ -4154,7 +4329,7 @@ export default function App() {
 
           {errorBanner && <Card className="mb-4" style={{ background: "var(--red-soft)", border: "none" }}><p className="text-sm" style={{ color: "var(--red)" }}>{errorBanner}</p></Card>}
 
-          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} categories={categories} despesasPrevistas={despesasPrevistas} contasReceber={contasReceber} recurringExpenses={recurringExpenses} />}
+          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} categories={categories} despesasPrevistas={despesasPrevistas} contasReceber={contasReceber} recurringExpenses={recurringExpenses} haverCreditos={haverCreditos} onAddHaver={addHaverCredito} onDeleteHaver={deleteHaverCredito} />}
           {tab === "fluxo" && <FluxoCaixaView transactions={transactions} accounts={accounts} categories={categories} onToggleConferido={toggleConferido} onDelete={deleteTransaction} onEdit={(t) => setModal({ kind: "edit-tx", tx: t })} canDelete={role.canDelete} />}
           {tab === "extrato-bancario" && <ExtratoBancarioView transactions={transactions} accounts={accounts} onToggleConferido={toggleConferido} />}
           {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} onExcluir={deleteTransaction} canDelete={role.canDelete} />}
