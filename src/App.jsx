@@ -734,13 +734,16 @@ function resolveCategoryEmoji(categories, name) {
 const QUICK_EMOJIS = ["🍽️", "⛽", "🛣️", "👷", "🔧", "🧾", "🏛️", "👥", "↩️", "🚚", "🧰", "🏨", "⚖️", "📑", "🛠️", "💵", "✈️", "📂", "🏦", "💳", "🛒", "📦", "🧹", "🎓"];
 /* ============================================================
    RETIRADAS DOS SÓCIOS — ELISÂNGELA × GILMAR (a partir de out/2026)
-   Cada lado soma salário de sócio + adiantamentos de pró-labore.
-   Do lado da Elisângela entra também o salário da empregada Daniela
-   (tabela haver_gilmar_creditos, tipo gasto_elisangela). Do lado do
-   Gilmar entram os pagamentos de haver (categoria GILMAR - PAGAMENTO DE HAVER).
-   Em haver de sócio = Elisângela − Gilmar. Aluguel do alojamento e jurídico
-   Rafaela são despesas da empresa devidas ao Gilmar: ficam em Despesas
-   Previstas (pessoa GILMAR) e só são somadas no total enquanto em aberto.
+   Lógica combinada com a Alessandra: o salário dos dois é igual e o
+   Gilmar tem a receber A MAIS, todo mês, 3 tópicos:
+     1) o salário da empregada Daniela (gasto em benefício da Elisângela)
+     2) o aluguel do alojamento em Telêmaco
+     3) o reembolso jurídico Rafaela
+   (tabela haver_gilmar_creditos: tipo gasto_elisangela = Daniela;
+    tipo credito_gilmar = aluguel / jurídico).
+   Soma-se também a diferença de salário + adiantamentos de pró-labore
+   (Elisângela − Gilmar). O que a empresa já pagou ao Gilmar na categoria
+   GILMAR - PAGAMENTO DE HAVER entra do lado dele e abate o em haver.
    Só totais: o detalhe dos adiantamentos é sigiloso.
    ============================================================ */
 const SOCIOS_INICIO = "2026-10-01";
@@ -750,16 +753,10 @@ const CAT_ADIANT_GILMAR = "GILMAR - ADIANTAMENTO DE PROLABORE";
 const CAT_PAGTO_HAVER = "GILMAR - PAGAMENTO DE HAVER";
 const SOCIOS_PRESETS = [
   { tipo: "gasto_elisangela", descricao: "Salário empregada Daniela (folha)" },
+  { tipo: "credito_gilmar", descricao: "Aluguel alojamento Telêmaco" },
+  { tipo: "credito_gilmar", descricao: "Reembolso jurídico Rafaela" },
 ];
-// Contas mensais devidas ao Gilmar — ficam em Despesas Previstas (pessoa GILMAR) até serem pagas
-const GILMAR_FIXOS = [
-  { nome: "Aluguel alojamento Telêmaco", categoria: "Hospedagem", valor: 1000 },
-  { nome: "Reembolso jurídico Rafaela", categoria: "REEMBOLSO", valor: 1000 },
-];
-function ultimoDiaMes(key) { const [y, m] = key.split("-").map(Number); return new Date(y, m, 0).toISOString().slice(0, 10); }
-function contasGilmarAbertas(despesasPrevistas) {
-  return (despesasPrevistas || []).filter((d) => d.status !== "paga" && (d.pessoa || "").toUpperCase().trim().startsWith("GILMAR"));
-}
+const GILMAR_FIXOS = [{ descricao: "Aluguel alojamento Telêmaco", valor: 1000 }, { descricao: "Reembolso jurídico Rafaela", valor: 1000 }];
 
 function mesKeyAdd(key, n) { let [y, m] = key.split("-").map(Number); m += n; while (m > 12) { m -= 12; y += 1; } while (m < 1) { m += 12; y -= 1; } return `${y}-${String(m).padStart(2, "0")}`; }
 function mesLabel(key) { const [y, m] = key.split("-").map(Number); const t = monthLabel(m, y); return t.charAt(0).toUpperCase() + t.slice(1); }
@@ -777,33 +774,34 @@ function calcRetiradasSocios(extras, transactions) {
   const cat = (t) => (t.categoria || "").toUpperCase();
   const pes = (t) => (t.pessoa || "").toUpperCase().trim();
   const soma = (arr) => arr.reduce((s, x) => s + Number(x.valor), 0);
+  const vazio = () => ({ elis: { salario: 0, adiantamentos: 0, total: 0 }, gil: { salario: 0, adiantamentos: 0, pagtoHaver: 0, total: 0 }, diferenca: 0, daniela: 0, aluguel: 0, juridico: 0, outros: 0, haverMes: 0 });
   let acumulado = 0;
   const meses = sociosMeses(extras).map((mes) => {
     const doMes = tx.filter((t) => (t.date || "").slice(0, 7) === mes);
     const ext = (extras || []).filter((c) => (c.competencia || "").slice(0, 7) === mes);
-    const elis = {
-      salario: soma(doMes.filter((t) => cat(t) === CAT_SALARIO_SOCIOS && pes(t).startsWith("ELIS"))),
-      adiantamentos: soma(doMes.filter((t) => cat(t) === CAT_ADIANT_ELIS)),
-      empregada: soma(ext.filter((c) => c.tipo === "gasto_elisangela")),
-    };
-    elis.total = elis.salario + elis.adiantamentos + elis.empregada;
-    const gil = {
-      salario: soma(doMes.filter((t) => cat(t) === CAT_SALARIO_SOCIOS && pes(t).startsWith("GILMAR"))),
-      adiantamentos: soma(doMes.filter((t) => cat(t) === CAT_ADIANT_GILMAR)),
-      pagtoHaver: soma(doMes.filter((t) => cat(t) === CAT_PAGTO_HAVER)),
-    };
-    gil.total = gil.salario + gil.adiantamentos + gil.pagtoHaver;
-    const creditos = soma(ext.filter((c) => c.tipo === "credito_gilmar"));
-    const diferenca = elis.total - gil.total;
-    const haverMes = diferenca + creditos;
-    acumulado += haverMes;
-    return { mes, ext, elis, gil, creditos, diferenca, haverMes, acumulado, temEmpregada: ext.some((c) => c.tipo === "gasto_elisangela") };
+    const r = vazio();
+    r.elis.salario = soma(doMes.filter((t) => cat(t) === CAT_SALARIO_SOCIOS && pes(t).startsWith("ELIS")));
+    r.elis.adiantamentos = soma(doMes.filter((t) => cat(t) === CAT_ADIANT_ELIS));
+    r.elis.total = r.elis.salario + r.elis.adiantamentos;
+    r.gil.salario = soma(doMes.filter((t) => cat(t) === CAT_SALARIO_SOCIOS && pes(t).startsWith("GILMAR")));
+    r.gil.adiantamentos = soma(doMes.filter((t) => cat(t) === CAT_ADIANT_GILMAR));
+    r.gil.pagtoHaver = soma(doMes.filter((t) => cat(t) === CAT_PAGTO_HAVER));
+    r.gil.total = r.gil.salario + r.gil.adiantamentos + r.gil.pagtoHaver;
+    r.diferenca = r.elis.total - r.gil.total;
+    r.daniela = soma(ext.filter((c) => c.tipo === "gasto_elisangela"));
+    const cred = ext.filter((c) => c.tipo === "credito_gilmar");
+    r.aluguel = soma(cred.filter((c) => (c.descricao || "").toUpperCase().includes("ALUGUEL")));
+    r.juridico = soma(cred.filter((c) => (c.descricao || "").toUpperCase().includes("JUR")));
+    r.outros = soma(cred) - r.aluguel - r.juridico;
+    r.haverMes = r.diferenca + r.daniela + r.aluguel + r.juridico + r.outros;
+    acumulado += r.haverMes;
+    return { mes, ext, ...r, acumulado, temEmpregada: ext.some((c) => c.tipo === "gasto_elisangela") };
   });
   const total = meses.reduce((t, m) => ({
-    elis: { salario: t.elis.salario + m.elis.salario, adiantamentos: t.elis.adiantamentos + m.elis.adiantamentos, empregada: t.elis.empregada + m.elis.empregada, total: t.elis.total + m.elis.total },
+    elis: { salario: t.elis.salario + m.elis.salario, adiantamentos: t.elis.adiantamentos + m.elis.adiantamentos, total: t.elis.total + m.elis.total },
     gil: { salario: t.gil.salario + m.gil.salario, adiantamentos: t.gil.adiantamentos + m.gil.adiantamentos, pagtoHaver: t.gil.pagtoHaver + m.gil.pagtoHaver, total: t.gil.total + m.gil.total },
-    creditos: t.creditos + m.creditos, diferenca: t.diferenca + m.diferenca, haverMes: t.haverMes + m.haverMes,
-  }), { elis: { salario: 0, adiantamentos: 0, empregada: 0, total: 0 }, gil: { salario: 0, adiantamentos: 0, pagtoHaver: 0, total: 0 }, creditos: 0, diferenca: 0, haverMes: 0 });
+    diferenca: t.diferenca + m.diferenca, daniela: t.daniela + m.daniela, aluguel: t.aluguel + m.aluguel, juridico: t.juridico + m.juridico, outros: t.outros + m.outros, haverMes: t.haverMes + m.haverMes,
+  }), vazio());
   return { meses, total, acumulado };
 }
 
@@ -816,32 +814,28 @@ function LinhaValor({ label, v, bold, tone, hint }) {
   );
 }
 
-function SociosRetiradasCard({ extras, transactions, despesasPrevistas, canEdit, onAddExtra, onDeleteExtra, onAddPrevistas }) {
+function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDeleteExtra }) {
   const { meses, total, acumulado } = useMemo(() => calcRetiradasSocios(extras, transactions), [extras, transactions]);
   const [periodo, setPeriodo] = useState("acumulado");
   const [gerenciar, setGerenciar] = useState(false);
   const [form, setForm] = useState(null);
-  const sel = periodo === "acumulado" ? total : meses.find((m) => m.mes === periodo) || total;
   const selMes = periodo === "acumulado" ? null : meses.find((m) => m.mes === periodo);
+  const sel = selMes || total;
+  const valorFinal = periodo === "acumulado" ? acumulado : sel.haverMes;
   const mesAtual = todayISO().slice(0, 7);
   const linhaAtual = meses.find((m) => m.mes === mesAtual);
-  const contasAbertas = contasGilmarAbertas(despesasPrevistas);
-  const contasDoPeriodo = periodo === "acumulado" ? contasAbertas : contasAbertas.filter((d) => (d.data_vencimento || "").slice(0, 7) === periodo);
-  const totalContas = contasDoPeriodo.reduce((s2, d) => s2 + Number(d.valor_previsto), 0);
-  const haverSocio = periodo === "acumulado" ? acumulado : sel.diferenca;
-  const fixosFaltando = GILMAR_FIXOS.filter((f) => !(despesasPrevistas || []).some((d) => (d.pessoa || "").toUpperCase().startsWith("GILMAR") && (d.descricao || "").startsWith(f.nome) && (d.data_vencimento || "").slice(0, 7) === mesAtual));
+  const fixosFaltando = GILMAR_FIXOS.filter((f) => !(linhaAtual?.ext || []).some((c) => c.tipo === "credito_gilmar" && c.descricao === f.descricao));
   const opcoesMes = [...new Set([...meses.map((m) => m.mes), mesKeyAdd(mesAtual, 1)])];
 
   const salvar = async () => {
     const valor = parseValorBR(form.valor);
     const preset = SOCIOS_PRESETS[Number(form.preset)];
-    const tipo = form.preset === "outro" ? form.tipo : preset.tipo;
+    const tipo = form.preset === "outro" ? "credito_gilmar" : preset.tipo;
     const descricao = form.preset === "outro" ? (form.outro || "").trim() : preset.descricao;
     if (!descricao || !(valor > 0)) { alert("Preencha a descrição e um valor maior que zero."); return; }
     const ok = await onAddExtra([{ competencia: form.mes + "-01", tipo, descricao, valor }]);
     if (ok) setForm(null);
   };
-
 
   return (
     <Card>
@@ -861,46 +855,44 @@ function SociosRetiradasCard({ extras, transactions, despesasPrevistas, canEdit,
           <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--ink-soft)" }}>Elisângela</p>
           <LinhaValor label="Salário de sócio" v={sel.elis.salario} />
           <LinhaValor label="Adiantamentos de pró-labore" v={sel.elis.adiantamentos} />
-          <LinhaValor label="Salário empregada Daniela" v={sel.elis.empregada} hint={selMes && !selMes.temEmpregada ? "· não lançada" : null} />
           <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total que pegou" v={sel.elis.total} bold /></div>
         </div>
         <div className="p-4">
           <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--ink-soft)" }}>Gilmar</p>
           <LinhaValor label="Salário de sócio" v={sel.gil.salario} />
           <LinhaValor label="Adiantamentos de pró-labore" v={sel.gil.adiantamentos} />
-          <LinhaValor label="Pagamentos do haver" v={sel.gil.pagtoHaver} />
+          {sel.gil.pagtoHaver > 0 && <LinhaValor label="Pagamentos do haver" v={sel.gil.pagtoHaver} />}
           <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total que pegou" v={sel.gil.total} bold /></div>
         </div>
-        <div className="md:col-span-2 px-4 py-3" style={{ background: "var(--navy)", color: "#fff" }}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
-            <div>
-              <p className="text-xs" style={{ color: "var(--gold-soft)" }}>{periodo === "acumulado" ? (haverSocio >= 0 ? "Em haver de sócio do Gilmar" : "Em haver de sócio da Elisângela") : `Em haver gerado em ${mesLabel(periodo).toLowerCase()}`}</p>
-              <p className="fin-mono font-semibold">{fmtBRL(Math.abs(haverSocio))}</p>
-              {selMes && <p className="text-xs" style={{ color: "var(--gold-soft)" }}>acumulado até este mês: {fmtBRL(selMes.acumulado)}</p>}
-            </div>
-            <div>
-              <p className="text-xs" style={{ color: "var(--gold-soft)" }}>(+) Contas a pagar ao Gilmar em aberto (aluguel + jurídico){periodo !== "acumulado" ? " · vencem no mês" : ""}</p>
-              <p className="fin-mono font-semibold">{fmtBRL(totalContas)}</p>
-            </div>
-            <div className="md:text-right">
-              <p className="text-xs" style={{ color: "var(--gold-soft)" }}>{periodo === "acumulado" ? "Total que a empresa deve ao Gilmar hoje" : `Total de ${mesLabel(periodo).toLowerCase()}`}</p>
-              <p className="fin-mono fin-display font-semibold" style={{ fontSize: 26 }}>{fmtBRL(haverSocio + totalContas)}</p>
-            </div>
-          </div>
+
+        <div className="md:col-span-2 p-4" style={{ borderTop: "1px solid var(--line)", background: "var(--paper)" }}>
+          <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--ink-soft)" }}>O Gilmar tem a receber a mais</p>
+          <LinhaValor label="Salário empregada Daniela" v={sel.daniela} hint={selMes && !selMes.temEmpregada ? "· não lançada" : null} />
+          <LinhaValor label="Aluguel alojamento Telêmaco" v={sel.aluguel} />
+          <LinhaValor label="Reembolso jurídico Rafaela" v={sel.juridico} />
+          {sel.outros > 0 && <LinhaValor label="Outros" v={sel.outros} />}
+          <LinhaValor label={sel.diferenca >= 0 ? "Diferença de salário + adiantamentos" : "Diferença de salário + adiantamentos (Gilmar pegou mais)"} v={sel.diferenca} tone={sel.diferenca < 0 ? "var(--red)" : undefined} />
+        </div>
+
+        <div className="md:col-span-2 px-4 py-3 flex items-end justify-between flex-wrap gap-2" style={{ background: "var(--navy)", color: "#fff" }}>
+          <p className="text-xs" style={{ color: "var(--gold-soft)" }}>
+            {periodo === "acumulado" ? (valorFinal >= 0 ? "Em haver do Gilmar hoje" : "Gilmar pegou a mais até hoje") : `Em haver gerado em ${mesLabel(periodo).toLowerCase()}`}
+            {selMes && <><br />acumulado até este mês: {fmtBRL(selMes.acumulado)}</>}
+          </p>
+          <p className="fin-mono fin-display font-semibold" style={{ fontSize: 26 }}>{fmtBRL(Math.abs(valorFinal))}</p>
         </div>
       </div>
 
       {gerenciar && (
         <Modal title="Lançamentos dos sócios" onClose={() => { setGerenciar(false); setForm(null); }} wide>
           <p className="text-xs mb-3" style={{ color: "var(--ink-soft)" }}>
-            Salários e adiantamentos vêm sozinhos dos lançamentos do caixa. Aqui você lança só o salário da Daniela, que conta como retirada da Elisângela.
-            O aluguel do alojamento e o jurídico Rafaela ficam em <b>Despesas Previstas</b> (pessoa GILMAR) até serem pagos — quando pagar, marque como paga lá.
-            Quando pagar o em haver de sócio ao Gilmar, lance uma despesa na categoria <b>{CAT_PAGTO_HAVER}</b>.
+            Salários e adiantamentos vêm sozinhos dos lançamentos do caixa. Aqui você lança, todo mês, os 3 tópicos que o Gilmar tem a receber a mais:
+            salário da Daniela, aluguel do alojamento e jurídico Rafaela. Quando a empresa pagar o haver ao Gilmar, lance uma despesa na categoria <b>{CAT_PAGTO_HAVER}</b>.
           </p>
           {fixosFaltando.length > 0 && (
             <div className="flex items-center justify-between gap-2 rounded-lg p-3 mb-3" style={{ background: "var(--amber-soft)" }}>
-              <p className="text-sm">Faltam as contas do Gilmar de {mesLabel(mesAtual).toLowerCase()}: {fixosFaltando.map((f) => f.nome).join(" e ")}. Vão para Despesas Previstas.</p>
-              <Btn variant="gold" onClick={() => onAddPrevistas(fixosFaltando.map((f) => ({ descricao: `${f.nome} — ${mesLabel(mesAtual).toLowerCase()}`, categoria: f.categoria, valor_previsto: f.valor, data_vencimento: ultimoDiaMes(mesAtual), pessoa: "GILMAR", empresa: "Power Eletric", observacao: "Devido ao Gilmar" })))}>Lançar</Btn>
+              <p className="text-sm">Faltam em {mesLabel(mesAtual).toLowerCase()}: {fixosFaltando.map((f) => f.descricao).join(" e ")}.</p>
+              <Btn variant="gold" onClick={() => onAddExtra(fixosFaltando.map((f) => ({ competencia: mesAtual + "-01", tipo: "credito_gilmar", ...f })))}>Lançar</Btn>
             </div>
           )}
           <div className="divide-y" style={{ borderColor: "var(--line)" }}>
@@ -909,7 +901,7 @@ function SociosRetiradasCard({ extras, transactions, despesasPrevistas, canEdit,
                 <p className="font-semibold text-sm mb-1">{mesLabel(m.mes)}{!m.temEmpregada && <span className="ml-2"><Pill tone="amber">Daniela não lançada</Pill></span>}</p>
                 {m.ext.length === 0 ? <p className="text-xs" style={{ color: "var(--ink-soft)" }}>Nada lançado.</p> : m.ext.map((c) => (
                   <div key={c.id} className="flex justify-between items-center py-1 text-sm">
-                    <span>{c.descricao} <span className="text-xs" style={{ color: "var(--ink-soft)" }}>· conta da Elisângela</span></span>
+                    <span>{c.descricao}</span>
                     <span className="flex items-center gap-2">
                       <span className="fin-mono">{fmtBRL(Number(c.valor))}</span>
                       <button title="Excluir" onClick={() => { if (confirm(`Excluir "${c.descricao}" de ${mesLabel(m.mes)}?`)) onDeleteExtra(c.id); }} className="fin-focus p-0.5" style={{ color: "var(--ink-soft)" }}><Trash2 size={13} /></button>
@@ -929,19 +921,15 @@ function SociosRetiradasCard({ extras, transactions, despesasPrevistas, canEdit,
               <Field label="O que é" required>
                 <Select value={form.preset} onChange={(e) => setForm({ ...form, preset: e.target.value })}>
                   {SOCIOS_PRESETS.map((p, i) => <option key={i} value={i}>{p.descricao}</option>)}
-                  <option value="outro">Outro…</option>
+                  <option value="outro">Outro a receber pelo Gilmar…</option>
                 </Select>
               </Field>
-              {form.preset === "outro" && (
-                <>
-                  <Field label="Descrição" required><TextInput value={form.outro || ""} onChange={(e) => setForm({ ...form, outro: e.target.value })} /></Field>
-                </>
-              )}
-              <Field label="Valor (R$)" required><TextInput inputMode="decimal" placeholder="Ex: 2.565,46" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} /></Field>
+              {form.preset === "outro" && <Field label="Descrição" required><TextInput value={form.outro || ""} onChange={(e) => setForm({ ...form, outro: e.target.value })} /></Field>}
+              <Field label="Valor (R$)" required><TextInput inputMode="decimal" placeholder="Ex: 2.552,66" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} /></Field>
               <div className="flex gap-2"><Btn onClick={salvar} icon={Check}>Salvar</Btn><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn></div>
             </div>
           ) : (
-            <Btn className="mt-3" icon={Plus} onClick={() => setForm({ mes: mesAtual, preset: "0", tipo: "gasto_elisangela", valor: "" })}>Adicionar</Btn>
+            <Btn className="mt-3" icon={Plus} onClick={() => setForm({ mes: mesAtual, preset: "0", valor: "" })}>Adicionar</Btn>
           )}
         </Modal>
       )}
@@ -949,7 +937,7 @@ function SociosRetiradasCard({ extras, transactions, despesasPrevistas, canEdit,
   );
 }
 
-function DashboardView({ accounts, transactions, engine, onQuickAction, role, categories, despesasPrevistas, contasReceber, recurringExpenses, haverCreditos, onAddHaver, onDeleteHaver, onAddPrevistas }) {
+function DashboardView({ accounts, transactions, engine, onQuickAction, role, categories, despesasPrevistas, contasReceber, recurringExpenses, haverCreditos, onAddHaver, onDeleteHaver }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -1159,7 +1147,7 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         </Card>
       </div>
 
-      <SociosRetiradasCard extras={haverCreditos} transactions={transactions} despesasPrevistas={despesasPrevistas} canEdit={!role?.isSocio} onAddExtra={onAddHaver} onDeleteExtra={onDeleteHaver} onAddPrevistas={onAddPrevistas} />
+      <SociosRetiradasCard extras={haverCreditos} transactions={transactions} canEdit={!role?.isSocio} onAddExtra={onAddHaver} onDeleteExtra={onDeleteHaver} />
 
     </div>
   );
@@ -4008,11 +3996,6 @@ export default function App() {
   };
 
   // ---------- Despesas previstas ----------
-  const addDespesasPrevistasLote = async (rows) => {
-    const { error } = await supabase.from("despesas_previstas").insert(rows.map((d) => ({ ...d, created_by: currentUser.id })));
-    if (error) { setErrorBanner("Não consegui salvar as contas do Gilmar: " + error.message); return false; }
-    setErrorBanner(""); return true;
-  };
   const addDespesaPrevista = async (d) => {
     const { error } = await supabase.from("despesas_previstas").insert({ ...d, created_by: currentUser.id });
     if (error) { setErrorBanner("Não consegui salvar a previsão: " + error.message); return false; }
@@ -4391,7 +4374,7 @@ export default function App() {
 
           {errorBanner && <Card className="mb-4" style={{ background: "var(--red-soft)", border: "none" }}><p className="text-sm" style={{ color: "var(--red)" }}>{errorBanner}</p></Card>}
 
-          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} categories={categories} despesasPrevistas={despesasPrevistas} contasReceber={contasReceber} recurringExpenses={recurringExpenses} haverCreditos={haverCreditos} onAddHaver={addHaverCredito} onDeleteHaver={deleteHaverCredito} onAddPrevistas={addDespesasPrevistasLote} />}
+          {tab === "dashboard" && <DashboardView accounts={accounts} transactions={transactions} engine={engine} onQuickAction={openQuick} role={role} categories={categories} despesasPrevistas={despesasPrevistas} contasReceber={contasReceber} recurringExpenses={recurringExpenses} haverCreditos={haverCreditos} onAddHaver={addHaverCredito} onDeleteHaver={deleteHaverCredito} />}
           {tab === "fluxo" && <FluxoCaixaView transactions={transactions} accounts={accounts} categories={categories} onToggleConferido={toggleConferido} onDelete={deleteTransaction} onEdit={(t) => setModal({ kind: "edit-tx", tx: t })} canDelete={role.canDelete} />}
           {tab === "extrato-bancario" && <ExtratoBancarioView transactions={transactions} accounts={accounts} onToggleConferido={toggleConferido} />}
           {tab === "adiantamentos" && <AdiantamentosView engine={engine} accounts={accounts} onBaixa={(a) => setModal({ kind: "baixa", adiantamento: a })} onDevolucao={(a) => setModal({ kind: "devolucao", adiantamento: a })} onExcluir={deleteTransaction} canDelete={role.canDelete} />}
