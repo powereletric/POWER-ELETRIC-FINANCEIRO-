@@ -755,6 +755,7 @@ const SOCIOS_PRESETS = [
   { tipo: "gasto_elisangela", descricao: "Salário empregada Daniela (folha)" },
   { tipo: "credito_gilmar", descricao: "Aluguel alojamento Telêmaco" },
   { tipo: "credito_gilmar", descricao: "Reembolso jurídico Rafaela" },
+  { tipo: "adiantamento_gilmar", descricao: "316,00 PARCELA CELULAR" },
 ];
 const GILMAR_FIXOS = [{ descricao: "Aluguel alojamento Telêmaco", valor: 1000 }, { descricao: "Reembolso jurídico Rafaela", valor: 1000 }];
 
@@ -774,7 +775,7 @@ function calcRetiradasSocios(extras, transactions) {
   const cat = (t) => (t.categoria || "").toUpperCase();
   const pes = (t) => (t.pessoa || "").toUpperCase().trim();
   const soma = (arr) => arr.reduce((s, x) => s + Number(x.valor), 0);
-  const vazio = () => ({ elis: { salario: 0, adiantamentos: 0, total: 0 }, gil: { salario: 0, adiantamentos: 0, pagtoHaver: 0, total: 0 }, diferenca: 0, daniela: 0, aluguel: 0, juridico: 0, outros: 0, haverMes: 0 });
+  const vazio = () => ({ elis: { salario: 0, adiantamentos: 0, total: 0 }, gil: { salario: 0, adiantamentos: 0, foraCaixa: 0, pagtoHaver: 0, total: 0 }, diferenca: 0, daniela: 0, aluguel: 0, juridico: 0, outros: 0, haverMes: 0 });
   let acumulado = 0;
   const meses = sociosMeses(extras).map((mes) => {
     const doMes = tx.filter((t) => (t.date || "").slice(0, 7) === mes);
@@ -784,7 +785,8 @@ function calcRetiradasSocios(extras, transactions) {
     r.elis.adiantamentos = soma(doMes.filter((t) => cat(t) === CAT_ADIANT_ELIS));
     r.elis.total = r.elis.salario + r.elis.adiantamentos;
     r.gil.salario = soma(doMes.filter((t) => cat(t) === CAT_SALARIO_SOCIOS && pes(t).startsWith("GILMAR")));
-    r.gil.adiantamentos = soma(doMes.filter((t) => cat(t) === CAT_ADIANT_GILMAR));
+    r.gil.foraCaixa = soma(ext.filter((c) => c.tipo === "adiantamento_gilmar"));
+    r.gil.adiantamentos = soma(doMes.filter((t) => cat(t) === CAT_ADIANT_GILMAR)) + r.gil.foraCaixa;
     r.gil.pagtoHaver = soma(doMes.filter((t) => cat(t) === CAT_PAGTO_HAVER));
     r.gil.total = r.gil.salario + r.gil.adiantamentos + r.gil.pagtoHaver;
     r.diferenca = r.elis.total - r.gil.total;
@@ -797,9 +799,13 @@ function calcRetiradasSocios(extras, transactions) {
     acumulado += r.haverMes;
     return { mes, ext, ...r, acumulado, temEmpregada: ext.some((c) => c.tipo === "gasto_elisangela") };
   });
-  const total = meses.reduce((t, m) => ({
+  // "hoje" = só os meses até o mês atual; meses futuros (ex.: parcelas já agendadas) aparecem no seletor mas não entram no acumulado
+  const hojeKey = todayISO().slice(0, 7);
+  const ateHoje = meses.filter((m) => m.mes <= hojeKey);
+  acumulado = ateHoje.length ? ateHoje[ateHoje.length - 1].acumulado : 0;
+  const total = ateHoje.reduce((t, m) => ({
     elis: { salario: t.elis.salario + m.elis.salario, adiantamentos: t.elis.adiantamentos + m.elis.adiantamentos, total: t.elis.total + m.elis.total },
-    gil: { salario: t.gil.salario + m.gil.salario, adiantamentos: t.gil.adiantamentos + m.gil.adiantamentos, pagtoHaver: t.gil.pagtoHaver + m.gil.pagtoHaver, total: t.gil.total + m.gil.total },
+    gil: { salario: t.gil.salario + m.gil.salario, adiantamentos: t.gil.adiantamentos + m.gil.adiantamentos, foraCaixa: t.gil.foraCaixa + m.gil.foraCaixa, pagtoHaver: t.gil.pagtoHaver + m.gil.pagtoHaver, total: t.gil.total + m.gil.total },
     diferenca: t.diferenca + m.diferenca, daniela: t.daniela + m.daniela, aluguel: t.aluguel + m.aluguel, juridico: t.juridico + m.juridico, outros: t.outros + m.outros, haverMes: t.haverMes + m.haverMes,
   }), vazio());
   return { meses, total, acumulado };
@@ -831,7 +837,8 @@ function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDele
     const valor = parseValorBR(form.valor);
     const preset = SOCIOS_PRESETS[Number(form.preset)];
     const tipo = form.preset === "outro" ? "credito_gilmar" : preset.tipo;
-    const descricao = form.preset === "outro" ? (form.outro || "").trim() : preset.descricao;
+    // parcela de celular: o texto já vem pronto, o mês completa a descrição
+    const descricao = form.preset === "outro" ? (form.outro || "").trim() : (preset.tipo === "adiantamento_gilmar" ? `${preset.descricao} — parcela de ${mesLabel(form.mes).split(" ")[0].toLowerCase()}` : preset.descricao);
     if (!descricao || !(valor > 0)) { alert("Preencha a descrição e um valor maior que zero."); return; }
     const ok = await onAddExtra([{ competencia: form.mes + "-01", tipo, descricao, valor }]);
     if (ok) setForm(null);
@@ -861,6 +868,7 @@ function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDele
           <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--ink-soft)" }}>Gilmar</p>
           <LinhaValor label="Salário de sócio" v={sel.gil.salario} />
           <LinhaValor label="Adiantamentos de pró-labore" v={sel.gil.adiantamentos} />
+          {sel.gil.foraCaixa > 0 && <p className="text-xs -mt-1 mb-1" style={{ color: "var(--ink-soft)" }}>inclui parcela celular: {fmtBRL(sel.gil.foraCaixa)}</p>}
           {sel.gil.pagtoHaver > 0 && <LinhaValor label="Pagamentos do haver" v={sel.gil.pagtoHaver} />}
           <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total que pegou" v={sel.gil.total} bold /></div>
         </div>
@@ -887,7 +895,7 @@ function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDele
         <Modal title="Lançamentos dos sócios" onClose={() => { setGerenciar(false); setForm(null); }} wide>
           <p className="text-xs mb-3" style={{ color: "var(--ink-soft)" }}>
             Salários e adiantamentos vêm sozinhos dos lançamentos do caixa. Aqui você lança, todo mês, os 3 tópicos que o Gilmar tem a receber a mais:
-            salário da Daniela, aluguel do alojamento e jurídico Rafaela. Quando a empresa pagar o haver ao Gilmar, lance uma despesa na categoria <b>{CAT_PAGTO_HAVER}</b>.
+            salário da Daniela, aluguel do alojamento e jurídico Rafaela. O que o Gilmar pegou fora do caixa (ex.: parcela de celular) entra aqui como adiantamento dele. Quando a empresa pagar o haver ao Gilmar, lance uma despesa na categoria <b>{CAT_PAGTO_HAVER}</b>.
           </p>
           {fixosFaltando.length > 0 && (
             <div className="flex items-center justify-between gap-2 rounded-lg p-3 mb-3" style={{ background: "var(--amber-soft)" }}>
