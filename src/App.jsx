@@ -733,163 +733,209 @@ function resolveCategoryEmoji(categories, name) {
 }
 const QUICK_EMOJIS = ["🍽️", "⛽", "🛣️", "👷", "🔧", "🧾", "🏛️", "👥", "↩️", "🚚", "🧰", "🏨", "⚖️", "📑", "🛠️", "💵", "✈️", "📂", "🏦", "💳", "🛒", "📦", "🧹", "🎓"];
 /* ============================================================
-   EM HAVER — GILMAR
-   A empresa deve ao Gilmar, todo mês a partir de out/2026:
-   salário da empregada (valor da folha) + aluguel do alojamento em
-   Telêmaco + reembolso jurídico Rafaela (tabela haver_gilmar_creditos).
-   Desconta o que ele pegou nas categorias abaixo, a partir de 01/10/2026.
-   O que sobra fica em haver e passa para o mês seguinte.
+   RETIRADAS DOS SÓCIOS — ELISÂNGELA × GILMAR (a partir de out/2026)
+   Cada lado soma salário de sócio + adiantamentos de pró-labore.
+   Do lado da Elisângela entra também o salário da empregada Daniela
+   (valor da folha), lançado na tabela haver_gilmar_creditos (tipo
+   gasto_elisangela). Do lado do Gilmar entram os pagamentos de haver.
+   Em haver do Gilmar = (Elisângela − Gilmar) + dívidas da empresa com
+   ele (aluguel alojamento Telêmaco, reembolso jurídico Rafaela —
+   tipo credito_gilmar). Só totais: o detalhe dos adiantamentos é sigiloso.
    ============================================================ */
-const HAVER_INICIO = "2026-10-01";
-const HAVER_CATEGORIAS_ABATIMENTO = ["GILMAR - ADIANTAMENTO DE PROLABORE", "GILMAR - PAGAMENTO DE HAVER"];
-const HAVER_PRESETS = ["Salário empregada (folha)", "Aluguel alojamento Telêmaco", "Reembolso jurídico Rafaela"];
-const HAVER_FIXOS = [{ descricao: "Aluguel alojamento Telêmaco", valor: 1000 }, { descricao: "Reembolso jurídico Rafaela", valor: 1000 }];
+const SOCIOS_INICIO = "2026-10-01";
+const CAT_SALARIO_SOCIOS = "SALÁRIOS SÓCIOS";
+const CAT_ADIANT_ELIS = "ELISANGELA - ADIANTAMENTO DE PROLABORE";
+const CAT_ADIANT_GILMAR = "GILMAR - ADIANTAMENTO DE PROLABORE";
+const CAT_PAGTO_HAVER = "GILMAR - PAGAMENTO DE HAVER";
+const SOCIOS_PRESETS = [
+  { tipo: "gasto_elisangela", descricao: "Salário empregada Daniela (folha)" },
+  { tipo: "credito_gilmar", descricao: "Aluguel alojamento Telêmaco" },
+  { tipo: "credito_gilmar", descricao: "Reembolso jurídico Rafaela" },
+];
+const GILMAR_FIXOS = [{ descricao: "Aluguel alojamento Telêmaco", valor: 1000 }, { descricao: "Reembolso jurídico Rafaela", valor: 1000 }];
 
-function haverMeses(creditos) {
-  // de out/2026 até o mês atual (ou o último mês com crédito lançado, se for depois)
+function mesKeyAdd(key, n) { let [y, m] = key.split("-").map(Number); m += n; while (m > 12) { m -= 12; y += 1; } while (m < 1) { m += 12; y -= 1; } return `${y}-${String(m).padStart(2, "0")}`; }
+function mesLabel(key) { const [y, m] = key.split("-").map(Number); const t = monthLabel(m, y); return t.charAt(0).toUpperCase() + t.slice(1); }
+
+function sociosMeses(extras) {
   const hoje = todayISO().slice(0, 7);
-  const ultimoCredito = (creditos || []).reduce((max, c) => ((c.competencia || "").slice(0, 7) > max ? c.competencia.slice(0, 7) : max), hoje);
-  const meses = [];
-  let [y, m] = HAVER_INICIO.slice(0, 7).split("-").map(Number);
-  while (true) {
-    const key = `${y}-${String(m).padStart(2, "0")}`;
-    meses.push(key);
-    if (key >= ultimoCredito) break;
-    m += 1; if (m > 12) { m = 1; y += 1; }
-  }
+  const fim = (extras || []).reduce((max, c) => ((c.competencia || "").slice(0, 7) > max ? c.competencia.slice(0, 7) : max), hoje);
+  const meses = []; let k = SOCIOS_INICIO.slice(0, 7);
+  while (k <= fim) { meses.push(k); k = mesKeyAdd(k, 1); }
   return meses;
 }
 
-function calcHaverGilmar(creditos, transactions) {
-  const abatimentos = (transactions || []).filter((t) =>
-    HAVER_CATEGORIAS_ABATIMENTO.includes((t.categoria || "").toUpperCase()) &&
-    (t.type === "despesa" || t.type === "baixa_adiantamento") &&
-    (t.date || "") >= HAVER_INICIO
-  );
-  let saldo = 0;
-  const linhas = haverMeses(creditos).map((mes) => {
-    const cred = (creditos || []).filter((c) => (c.competencia || "").slice(0, 7) === mes);
-    const abat = abatimentos.filter((t) => (t.date || "").slice(0, 7) === mes);
-    const totalCred = cred.reduce((s, c) => s + Number(c.valor), 0);
-    const totalAbat = abat.reduce((s, t) => s + Number(t.valor), 0);
-    const saldoAnterior = saldo;
-    saldo = saldoAnterior + totalCred - totalAbat;
-    return { mes, cred, abat, totalCred, totalAbat, saldoAnterior, saldo };
+function calcRetiradasSocios(extras, transactions) {
+  const tx = (transactions || []).filter((t) => (t.type === "despesa" || t.type === "baixa_adiantamento") && (t.date || "") >= SOCIOS_INICIO);
+  const cat = (t) => (t.categoria || "").toUpperCase();
+  const pes = (t) => (t.pessoa || "").toUpperCase().trim();
+  const soma = (arr) => arr.reduce((s, x) => s + Number(x.valor), 0);
+  let acumulado = 0;
+  const meses = sociosMeses(extras).map((mes) => {
+    const doMes = tx.filter((t) => (t.date || "").slice(0, 7) === mes);
+    const ext = (extras || []).filter((c) => (c.competencia || "").slice(0, 7) === mes);
+    const elis = {
+      salario: soma(doMes.filter((t) => cat(t) === CAT_SALARIO_SOCIOS && pes(t).startsWith("ELIS"))),
+      adiantamentos: soma(doMes.filter((t) => cat(t) === CAT_ADIANT_ELIS)),
+      empregada: soma(ext.filter((c) => c.tipo === "gasto_elisangela")),
+    };
+    elis.total = elis.salario + elis.adiantamentos + elis.empregada;
+    const gil = {
+      salario: soma(doMes.filter((t) => cat(t) === CAT_SALARIO_SOCIOS && pes(t).startsWith("GILMAR"))),
+      adiantamentos: soma(doMes.filter((t) => cat(t) === CAT_ADIANT_GILMAR)),
+      pagtoHaver: soma(doMes.filter((t) => cat(t) === CAT_PAGTO_HAVER)),
+    };
+    gil.total = gil.salario + gil.adiantamentos + gil.pagtoHaver;
+    const creditos = soma(ext.filter((c) => c.tipo === "credito_gilmar"));
+    const diferenca = elis.total - gil.total;
+    const haverMes = diferenca + creditos;
+    acumulado += haverMes;
+    return { mes, ext, elis, gil, creditos, diferenca, haverMes, acumulado, temEmpregada: ext.some((c) => c.tipo === "gasto_elisangela") };
   });
-  return { linhas, saldo };
+  const total = meses.reduce((t, m) => ({
+    elis: { salario: t.elis.salario + m.elis.salario, adiantamentos: t.elis.adiantamentos + m.elis.adiantamentos, empregada: t.elis.empregada + m.elis.empregada, total: t.elis.total + m.elis.total },
+    gil: { salario: t.gil.salario + m.gil.salario, adiantamentos: t.gil.adiantamentos + m.gil.adiantamentos, pagtoHaver: t.gil.pagtoHaver + m.gil.pagtoHaver, total: t.gil.total + m.gil.total },
+    creditos: t.creditos + m.creditos, diferenca: t.diferenca + m.diferenca, haverMes: t.haverMes + m.haverMes,
+  }), { elis: { salario: 0, adiantamentos: 0, empregada: 0, total: 0 }, gil: { salario: 0, adiantamentos: 0, pagtoHaver: 0, total: 0 }, creditos: 0, diferenca: 0, haverMes: 0 });
+  return { meses, total, acumulado };
 }
 
-function mesLabel(key) { const [y, m] = key.split("-").map(Number); const t = monthLabel(m, y); return t.charAt(0).toUpperCase() + t.slice(1); }
+function LinhaValor({ label, v, bold, tone, hint }) {
+  return (
+    <div className={`flex justify-between items-baseline py-1.5 ${bold ? "font-semibold" : ""}`}>
+      <span className="text-sm">{label}{hint && <span className="text-xs ml-1" style={{ color: "var(--amber)" }}>{hint}</span>}</span>
+      <span className="fin-mono text-sm" style={{ color: tone || "var(--ink)" }}>{fmtBRL(v)}</span>
+    </div>
+  );
+}
 
-function HaverGilmarCard({ creditos, transactions, canEdit, onAddCredito, onDeleteCredito }) {
-  const [open, setOpen] = useState(false);
+function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDeleteExtra }) {
+  const { meses, total, acumulado } = useMemo(() => calcRetiradasSocios(extras, transactions), [extras, transactions]);
+  const [periodo, setPeriodo] = useState("acumulado");
+  const [gerenciar, setGerenciar] = useState(false);
   const [form, setForm] = useState(null);
-  const { linhas, saldo } = useMemo(() => calcHaverGilmar(creditos, transactions), [creditos, transactions]);
+  const sel = periodo === "acumulado" ? total : meses.find((m) => m.mes === periodo) || total;
+  const selMes = periodo === "acumulado" ? null : meses.find((m) => m.mes === periodo);
   const mesAtual = todayISO().slice(0, 7);
-  const linhaAtual = linhas.find((l) => l.mes === mesAtual);
-  const fixosFaltando = HAVER_FIXOS.filter((f) => !(linhaAtual?.cred || []).some((c) => c.descricao === f.descricao));
+  const linhaAtual = meses.find((m) => m.mes === mesAtual);
+  const fixosFaltando = GILMAR_FIXOS.filter((f) => !(linhaAtual?.ext || []).some((c) => c.tipo === "credito_gilmar" && c.descricao === f.descricao));
+  const opcoesMes = [...new Set([...meses.map((m) => m.mes), mesKeyAdd(mesAtual, 1)])];
 
   const salvar = async () => {
     const valor = parseValorBR(form.valor);
-    const descricao = form.descricao === "__outro" ? (form.outro || "").trim() : form.descricao;
+    const preset = SOCIOS_PRESETS[Number(form.preset)];
+    const tipo = form.preset === "outro" ? form.tipo : preset.tipo;
+    const descricao = form.preset === "outro" ? (form.outro || "").trim() : preset.descricao;
     if (!descricao || !(valor > 0)) { alert("Preencha a descrição e um valor maior que zero."); return; }
-    const ok = await onAddCredito([{ competencia: form.mes + "-01", descricao, valor }]);
+    const ok = await onAddExtra([{ competencia: form.mes + "-01", tipo, descricao, valor }]);
     if (ok) setForm(null);
   };
 
-  const proximoMes = (() => { let [y, m] = mesAtual.split("-").map(Number); m += 1; if (m > 12) { m = 1; y += 1; } return `${y}-${String(m).padStart(2, "0")}`; })();
-  const opcoesMes = [...new Set([...linhas.map((l) => l.mes), proximoMes])];
+  const quemDeve = acumulado >= 0 ? "Em haver do Gilmar" : "Em haver da Elisângela";
+  const difLabel = sel.diferenca >= 0 ? "Elisângela pegou a mais" : "Gilmar pegou a mais";
 
   return (
-    <>
-      <button onClick={() => setOpen(true)} className="fin-btn fin-card fin-focus text-left rounded-xl w-full">
-        <Card>
-          <div className="flex items-center gap-2 mb-1"><Handshake size={16} style={{ color: "var(--gold)" }} /><p className="text-xs font-medium" style={{ color: "var(--ink-soft)" }}>Em haver — Gilmar</p></div>
-          <Money v={saldo} tone={saldo >= 0 ? undefined : "neg"} />
-          <p className="text-xs mt-1" style={{ color: "var(--ink-soft)" }}>{saldo >= 0 ? "a empresa deve a ele" : "ele pegou a mais"} · desde out/2026</p>
-        </Card>
-      </button>
+    <Card>
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div className="flex items-center gap-2"><Handshake size={18} style={{ color: "var(--gold)" }} /><p className="font-semibold fin-display">Retiradas dos sócios</p></div>
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <Select value={periodo} onChange={(e) => setPeriodo(e.target.value)} style={{ minWidth: 0, flex: 1, maxWidth: 260 }}>
+            <option value="acumulado">Acumulado desde out/2026</option>
+            {[...meses].reverse().map((m) => <option key={m.mes} value={m.mes}>{mesLabel(m.mes)}</option>)}
+          </Select>
+          {canEdit && <Btn variant="ghost" icon={Edit2} onClick={() => setGerenciar(true)}>Lançamentos</Btn>}
+        </div>
+      </div>
 
-      {open && (
-        <Modal title="Em haver — Gilmar" onClose={() => { setOpen(false); setForm(null); }} wide>
-          <p className="text-xs mb-4" style={{ color: "var(--ink-soft)" }}>
-            Todo mês a empresa deve ao Gilmar o salário da empregada (valor da folha), o aluguel do alojamento em Telêmaco e o reembolso jurídico Rafaela.
-            Desconta o que ele pegou como adiantamento de pró-labore ou como pagamento do haver. O que sobra passa para o mês seguinte.
-          </p>
-
-          <div className="rounded-xl p-4 mb-4" style={{ background: "var(--navy)", color: "#fff" }}>
-            <p className="text-xs uppercase tracking-wide" style={{ color: "var(--gold-soft)" }}>Saldo em haver hoje</p>
-            <p className="fin-mono fin-display font-semibold" style={{ fontSize: 30 }}>{fmtBRL(saldo)}</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-0 rounded-xl overflow-hidden" style={{ border: "1px solid var(--line)" }}>
+        <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--line)" }}>
+          <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--ink-soft)" }}>Elisângela</p>
+          <LinhaValor label="Salário de sócio" v={sel.elis.salario} />
+          <LinhaValor label="Adiantamentos de pró-labore" v={sel.elis.adiantamentos} />
+          <LinhaValor label="Empregada Daniela (folha)" v={sel.elis.empregada} hint={selMes && !selMes.temEmpregada ? "· não lançada" : null} />
+          <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total que pegou" v={sel.elis.total} bold /></div>
+        </div>
+        <div className="p-4">
+          <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--ink-soft)" }}>Gilmar</p>
+          <LinhaValor label="Salário de sócio" v={sel.gil.salario} />
+          <LinhaValor label="Adiantamentos de pró-labore" v={sel.gil.adiantamentos} />
+          <LinhaValor label="Pagamentos do haver" v={sel.gil.pagtoHaver} />
+          <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total que pegou" v={sel.gil.total} bold /></div>
+        </div>
+        <div className="md:col-span-2 px-4 py-3" style={{ background: "var(--navy)", color: "#fff" }}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+            <div><p className="text-xs" style={{ color: "var(--gold-soft)" }}>{difLabel}</p><p className="fin-mono font-semibold">{fmtBRL(Math.abs(sel.diferenca))}</p></div>
+            <div><p className="text-xs" style={{ color: "var(--gold-soft)" }}>(+) Empresa deve ao Gilmar (aluguel + jurídico)</p><p className="fin-mono font-semibold">{fmtBRL(sel.creditos)}</p></div>
+            <div className="md:text-right">
+              <p className="text-xs" style={{ color: "var(--gold-soft)" }}>{periodo === "acumulado" ? quemDeve + " hoje" : `Em haver gerado em ${mesLabel(periodo).toLowerCase()}`}</p>
+              <p className="fin-mono fin-display font-semibold" style={{ fontSize: 26 }}>{fmtBRL(Math.abs(periodo === "acumulado" ? acumulado : sel.haverMes))}</p>
+              {selMes && <p className="text-xs" style={{ color: "var(--gold-soft)" }}>acumulado até este mês: {fmtBRL(selMes.acumulado)}</p>}
+            </div>
           </div>
+        </div>
+      </div>
 
-          {canEdit && fixosFaltando.length > 0 && (
-            <div className="flex items-center justify-between gap-2 rounded-lg p-3 mb-4" style={{ background: "var(--amber-soft)" }}>
-              <p className="text-sm">Faltam os fixos de {mesLabel(mesAtual)}: {fixosFaltando.map((f) => f.descricao).join(" e ")}.</p>
-              <Btn variant="gold" onClick={() => onAddCredito(fixosFaltando.map((f) => ({ competencia: mesAtual + "-01", ...f })))}>Lançar</Btn>
+      {gerenciar && (
+        <Modal title="Lançamentos dos sócios" onClose={() => { setGerenciar(false); setForm(null); }} wide>
+          <p className="text-xs mb-3" style={{ color: "var(--ink-soft)" }}>
+            Salários e adiantamentos vêm sozinhos dos lançamentos do caixa. Aqui você lança só o salário da Daniela (valor da folha, conta como da Elisângela)
+            e o que a empresa deve ao Gilmar (aluguel do alojamento e jurídico Rafaela). Quando pagar o haver ao Gilmar, lance uma despesa na categoria <b>{CAT_PAGTO_HAVER}</b>.
+          </p>
+          {fixosFaltando.length > 0 && (
+            <div className="flex items-center justify-between gap-2 rounded-lg p-3 mb-3" style={{ background: "var(--amber-soft)" }}>
+              <p className="text-sm">Faltam em {mesLabel(mesAtual).toLowerCase()}: {fixosFaltando.map((f) => f.descricao).join(" e ")}.</p>
+              <Btn variant="gold" onClick={() => onAddExtra(fixosFaltando.map((f) => ({ competencia: mesAtual + "-01", tipo: "credito_gilmar", ...f })))}>Lançar</Btn>
             </div>
           )}
-
-          <div className="space-y-4">
-            {[...linhas].reverse().map((l) => {
-              const temEmpregada = l.cred.some((c) => c.descricao.toUpperCase().includes("EMPREGADA"));
-              return (
-                <div key={l.mes} className="rounded-xl p-3" style={{ border: "1px solid var(--line)" }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="font-semibold">{mesLabel(l.mes)}</p>
-                    {!temEmpregada && <Pill tone="amber">empregada ainda não lançada</Pill>}
+          <div className="divide-y" style={{ borderColor: "var(--line)" }}>
+            {[...meses].reverse().map((m) => (
+              <div key={m.mes} className="py-2">
+                <p className="font-semibold text-sm mb-1">{mesLabel(m.mes)}{!m.temEmpregada && <span className="ml-2"><Pill tone="amber">Daniela não lançada</Pill></span>}</p>
+                {m.ext.length === 0 ? <p className="text-xs" style={{ color: "var(--ink-soft)" }}>Nada lançado.</p> : m.ext.map((c) => (
+                  <div key={c.id} className="flex justify-between items-center py-1 text-sm">
+                    <span>{c.descricao} <span className="text-xs" style={{ color: "var(--ink-soft)" }}>· {c.tipo === "gasto_elisangela" ? "conta da Elisângela" : "empresa deve ao Gilmar"}</span></span>
+                    <span className="flex items-center gap-2">
+                      <span className="fin-mono">{fmtBRL(Number(c.valor))}</span>
+                      <button title="Excluir" onClick={() => { if (confirm(`Excluir "${c.descricao}" de ${mesLabel(m.mes)}?`)) onDeleteExtra(c.id); }} className="fin-focus p-0.5" style={{ color: "var(--ink-soft)" }}><Trash2 size={13} /></button>
+                    </span>
                   </div>
-                  <div className="text-sm divide-y" style={{ borderColor: "var(--line)" }}>
-                    <div className="flex justify-between py-1.5" style={{ color: "var(--ink-soft)" }}><span>Saldo do mês anterior</span><span className="fin-mono">{fmtBRL(l.saldoAnterior)}</span></div>
-                    {l.cred.map((c) => (
-                      <div key={c.id} className="flex justify-between items-center py-1.5">
-                        <span>(+) {c.descricao}</span>
-                        <span className="flex items-center gap-2">
-                          <span className="fin-mono" style={{ color: "var(--green)" }}>{fmtBRL(Number(c.valor))}</span>
-                          {canEdit && <button title="Excluir" onClick={() => { if (confirm(`Excluir "${c.descricao}" de ${mesLabel(l.mes)}?`)) onDeleteCredito(c.id); }} className="fin-focus p-0.5" style={{ color: "var(--ink-soft)" }}><Trash2 size={13} /></button>}
-                        </span>
-                      </div>
-                    ))}
-                    {l.abat.map((t) => (
-                      <div key={t.id} className="flex justify-between py-1.5">
-                        <span>(−) {(t.categoria || "").toUpperCase() === "GILMAR - PAGAMENTO DE HAVER" ? "Pagamento do haver" : "Adiantamento de pró-labore"} · {fmtDate(t.date)}</span>
-                        <span className="fin-mono" style={{ color: "var(--red)" }}>{fmtBRL(Number(t.valor))}</span>
-                      </div>
-                    ))}
-                    <div className="flex justify-between py-1.5 font-semibold"><span>Saldo em haver no fim do mês</span><span className="fin-mono">{fmtBRL(l.saldo)}</span></div>
-                  </div>
-                </div>
-              );
-            })}
+                ))}
+              </div>
+            ))}
           </div>
-
-          {canEdit && (form ? (
-            <div className="rounded-xl p-3 mt-4" style={{ border: "1px solid var(--line)" }}>
-              <p className="font-semibold mb-2">Novo crédito para o Gilmar</p>
+          {form ? (
+            <div className="rounded-xl p-3 mt-3" style={{ border: "1px solid var(--line)" }}>
               <Field label="Mês" required>
                 <Select value={form.mes} onChange={(e) => setForm({ ...form, mes: e.target.value })}>
-                  {opcoesMes.map((m) => <option key={m} value={m}>{mesLabel(m)}</option>)}
+                  {opcoesMes.map((k) => <option key={k} value={k}>{mesLabel(k)}</option>)}
                 </Select>
               </Field>
               <Field label="O que é" required>
-                <Select value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })}>
-                  {HAVER_PRESETS.map((p) => <option key={p} value={p}>{p}</option>)}
-                  <option value="__outro">Outro…</option>
+                <Select value={form.preset} onChange={(e) => setForm({ ...form, preset: e.target.value })}>
+                  {SOCIOS_PRESETS.map((p, i) => <option key={i} value={i}>{p.descricao}</option>)}
+                  <option value="outro">Outro…</option>
                 </Select>
               </Field>
-              {form.descricao === "__outro" && <Field label="Descrição" required><TextInput value={form.outro || ""} onChange={(e) => setForm({ ...form, outro: e.target.value })} /></Field>}
+              {form.preset === "outro" && (
+                <>
+                  <Field label="Descrição" required><TextInput value={form.outro || ""} onChange={(e) => setForm({ ...form, outro: e.target.value })} /></Field>
+                  <Field label="Entra como" required>
+                    <Select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
+                      <option value="gasto_elisangela">Gasto da Elisângela</option>
+                      <option value="credito_gilmar">Empresa deve ao Gilmar</option>
+                    </Select>
+                  </Field>
+                </>
+              )}
               <Field label="Valor (R$)" required><TextInput inputMode="decimal" placeholder="Ex: 2.565,46" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} /></Field>
               <div className="flex gap-2"><Btn onClick={salvar} icon={Check}>Salvar</Btn><Btn variant="ghost" onClick={() => setForm(null)}>Cancelar</Btn></div>
             </div>
           ) : (
-            <Btn className="mt-4" icon={Plus} onClick={() => setForm({ mes: mesAtual, descricao: HAVER_PRESETS[0], valor: "" })}>Adicionar crédito</Btn>
-          ))}
-
-          <p className="text-xs mt-4" style={{ color: "var(--ink-soft)" }}>
-            Para registrar quando a empresa pagar o haver ao Gilmar, lance uma despesa na categoria <b>GILMAR - PAGAMENTO DE HAVER</b>. Ela entra aqui como desconto automaticamente.
-          </p>
+            <Btn className="mt-3" icon={Plus} onClick={() => setForm({ mes: mesAtual, preset: "0", tipo: "gasto_elisangela", valor: "" })}>Adicionar</Btn>
+          )}
         </Modal>
       )}
-    </>
+    </Card>
   );
 }
 
@@ -990,6 +1036,8 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🏁 Saldo final do mês</p><Money v={saldoFinalPeriodo} tone={saldoFinalPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
       </div>
 
+      <SociosRetiradasCard extras={haverCreditos} transactions={transactions} canEdit={!role?.isSocio} onAddExtra={onAddHaver} onDeleteExtra={onDeleteHaver} />
+
       {despesasPorCategoria.length > 0 && (
         <div>
           <p className="font-semibold mb-2 fin-display" style={{ color: "var(--ink-soft)" }}>Com o que a Power gastou este mês</p>
@@ -1088,8 +1136,7 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         </Modal>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <HaverGilmarCard creditos={haverCreditos} transactions={transactions} canEdit={!role?.isSocio} onAddCredito={onAddHaver} onDeleteCredito={onDeleteHaver} />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <Card>
           <div className="flex items-center gap-2 mb-1"><AlertCircle size={16} style={{ color: "var(--red)" }} /><p className="text-xs font-medium" style={{ color: "var(--ink-soft)" }}>Reembolsos pendentes</p></div>
           <Money v={engine.totalReembolsosPendentes} tone="neg" />
@@ -3921,7 +3968,7 @@ export default function App() {
   };
   const addHaverCredito = async (rows) => {
     const { error } = await supabase.from("haver_gilmar_creditos").insert(rows.map((r) => ({ ...r, created_by: currentUser?.id })));
-    if (error) { setErrorBanner("Não consegui salvar o crédito do Gilmar: " + error.message); return false; }
+    if (error) { setErrorBanner("Não consegui salvar o lançamento dos sócios: " + error.message); return false; }
     setErrorBanner(""); return true;
   };
   const deleteHaverCredito = async (id) => {
