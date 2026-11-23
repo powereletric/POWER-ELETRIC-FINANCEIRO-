@@ -945,6 +945,67 @@ function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDele
   );
 }
 
+/* Card "Despesas pagas pelo Gilmar": o Gilmar paga gastos da empresa do próprio bolso
+   (lançados como despesa na Conta Gilmar) e a empresa reembolsa com transferência para a Conta Gilmar.
+   Mês: quanto ele pagou e quanto foi reembolsado no mês selecionado.
+   Situação: saldo acumulado da Conta Gilmar até o fim do mês selecionado —
+   negativo = empresa ainda deve reembolsar; positivo = ele recebeu antes de lançar os gastos. */
+function GilmarReembolsoCard({ transactions, accounts, month, year }) {
+  const conta = accounts.find((a) => (a.name || "").toLowerCase().includes("gilmar"));
+  if (!conta) return null;
+  const inicio = `${year}-${String(month).padStart(2, "0")}-01`;
+  const prox = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const efeito = (t) => {
+    if (t.type === "transferencia") {
+      if (t.contaDestino === conta.id) return t.valor;
+      if (t.contaOrigem === conta.id) return -t.valor;
+      return 0;
+    }
+    if (t.conta !== conta.id) return 0;
+    if (t.type === "despesa") return t.pendenteReembolso ? 0 : -t.valor;
+    if (["receita", "ajuste", "devolucao_adiantamento", "emprestimo_terceiro"].includes(t.type)) return t.valor;
+    if (["adiantamento", "reembolso_pagamento", "pagamento_emprestimo"].includes(t.type)) return -t.valor;
+    return 0;
+  };
+  const validas = transactions.filter((t) => (t.date || "") >= CORTE_HISTORICO);
+  const doMes = validas.filter((t) => t.date >= inicio && t.date < prox);
+  const pagouMes = doMes.filter((t) => t.type === "despesa" && t.conta === conta.id).reduce((s, t) => s + t.valor, 0);
+  const reembolsadoMes = doMes.filter((t) => t.type === "transferencia").reduce((s, t) => s + efeito(t), 0);
+  const saldo = (conta.saldoInicial || 0) + validas.filter((t) => t.date < prox).reduce((s, t) => s + efeito(t), 0);
+  const arred = Math.round(saldo * 100) / 100;
+  let titulo, valor, cor, nota;
+  if (arred < 0) {
+    titulo = "Falta reembolsar ao Gilmar"; valor = -arred; cor = "var(--red)";
+    nota = "A empresa ainda deve esse valor a ele.";
+  } else if (arred > 0) {
+    titulo = "Gilmar recebeu a mais"; valor = arred; cor = "var(--amber)";
+    nota = "Ele recebeu esse valor e os gastos ainda não foram lançados na Conta Gilmar.";
+  } else {
+    titulo = "Reembolso em dia"; valor = 0; cor = "var(--green)";
+    nota = "Tudo o que ele pagou já foi reembolsado.";
+  }
+  return (
+    <Card>
+      <p className="font-semibold fin-display mb-3">🧾 Despesas pagas pelo Gilmar — {monthLabel(month, year)}</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <p className="text-xs" style={{ color: "var(--ink-soft)" }}>Gilmar pagou no mês</p>
+          <Money v={pagouMes} tone="neg" size="lg" />
+        </div>
+        <div>
+          <p className="text-xs" style={{ color: "var(--ink-soft)" }}>Reembolsado no mês</p>
+          <Money v={reembolsadoMes} tone="pos" size="lg" />
+        </div>
+        <div>
+          <p className="text-xs" style={{ color: "var(--ink-soft)" }}>{titulo}</p>
+          <span className="fin-mono font-semibold text-2xl" style={{ color: cor }}>{fmtBRL(valor)}</span>
+          <p className="text-xs mt-1" style={{ color: "var(--ink-soft)" }}>{nota} (acumulado até o fim do mês)</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function DashboardView({ accounts, transactions, engine, onQuickAction, role, categories, despesasPrevistas, contasReceber, recurringExpenses, haverCreditos, onAddHaver, onDeleteHaver }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -1041,6 +1102,8 @@ function DashboardView({ accounts, transactions, engine, onQuickAction, role, ca
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>📈 Resultado do mês</p><Money v={totals.saldoPeriodo} tone={totals.saldoPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
         <Card><p className="text-xs" style={{ color: "var(--ink-soft)" }}>🏁 Saldo final do mês</p><Money v={saldoFinalPeriodo} tone={saldoFinalPeriodo >= 0 ? "pos" : "neg"} size="lg" /></Card>
       </div>
+
+      <GilmarReembolsoCard transactions={transactions} accounts={accounts} month={month} year={year} />
 
       {despesasPorCategoria.length > 0 && (
         <div>
