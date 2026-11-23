@@ -775,7 +775,7 @@ function calcRetiradasSocios(extras, transactions) {
   const cat = (t) => (t.categoria || "").toUpperCase();
   const pes = (t) => (t.pessoa || "").toUpperCase().trim();
   const soma = (arr) => arr.reduce((s, x) => s + Number(x.valor), 0);
-  const vazio = () => ({ elis: { salario: 0, adiantamentos: 0, total: 0 }, gil: { salario: 0, adiantamentos: 0, foraCaixa: 0, pagtoHaver: 0, total: 0 }, diferenca: 0, daniela: 0, aluguel: 0, juridico: 0, outros: 0, haverMes: 0 });
+  const vazio = () => ({ elis: { salario: 0, adiantamentos: 0, total: 0 }, gil: { salario: 0, adiantamentos: 0, foraCaixa: 0, pagtoHaver: 0, total: 0 }, diferenca: 0, daniela: 0, aluguel: 0, juridico: 0, outros: 0, aReceber: 0, haverMes: 0 });
   let acumulado = 0;
   const meses = sociosMeses(extras).map((mes) => {
     const doMes = tx.filter((t) => (t.date || "").slice(0, 7) === mes);
@@ -788,14 +788,17 @@ function calcRetiradasSocios(extras, transactions) {
     r.gil.foraCaixa = soma(ext.filter((c) => c.tipo === "adiantamento_gilmar"));
     r.gil.adiantamentos = soma(doMes.filter((t) => cat(t) === CAT_ADIANT_GILMAR)) + r.gil.foraCaixa;
     r.gil.pagtoHaver = soma(doMes.filter((t) => cat(t) === CAT_PAGTO_HAVER));
-    r.gil.total = r.gil.salario + r.gil.adiantamentos + r.gil.pagtoHaver;
-    r.diferenca = r.elis.total - r.gil.total;
+    r.gil.total = r.gil.salario + r.gil.adiantamentos;
+    // salário é igual e fica à parte; só a diferença de adiantamentos entra na conta
+    r.diferenca = r.elis.adiantamentos - r.gil.adiantamentos;
     r.daniela = soma(ext.filter((c) => c.tipo === "gasto_elisangela"));
     const cred = ext.filter((c) => c.tipo === "credito_gilmar");
     r.aluguel = soma(cred.filter((c) => (c.descricao || "").toUpperCase().includes("ALUGUEL")));
     r.juridico = soma(cred.filter((c) => (c.descricao || "").toUpperCase().includes("JUR")));
     r.outros = soma(cred) - r.aluguel - r.juridico;
-    r.haverMes = r.diferenca + r.daniela + r.aluguel + r.juridico + r.outros;
+    r.aReceber = r.daniela + r.aluguel + r.juridico + r.outros;
+    // pagamento do haver não é "retirada": é a empresa quitando o que deve
+    r.haverMes = r.aReceber + r.diferenca - r.gil.pagtoHaver;
     acumulado += r.haverMes;
     return { mes, ext, ...r, acumulado, temEmpregada: ext.some((c) => c.tipo === "gasto_elisangela") };
   });
@@ -806,7 +809,7 @@ function calcRetiradasSocios(extras, transactions) {
   const total = ateHoje.reduce((t, m) => ({
     elis: { salario: t.elis.salario + m.elis.salario, adiantamentos: t.elis.adiantamentos + m.elis.adiantamentos, total: t.elis.total + m.elis.total },
     gil: { salario: t.gil.salario + m.gil.salario, adiantamentos: t.gil.adiantamentos + m.gil.adiantamentos, foraCaixa: t.gil.foraCaixa + m.gil.foraCaixa, pagtoHaver: t.gil.pagtoHaver + m.gil.pagtoHaver, total: t.gil.total + m.gil.total },
-    diferenca: t.diferenca + m.diferenca, daniela: t.daniela + m.daniela, aluguel: t.aluguel + m.aluguel, juridico: t.juridico + m.juridico, outros: t.outros + m.outros, haverMes: t.haverMes + m.haverMes,
+    diferenca: t.diferenca + m.diferenca, daniela: t.daniela + m.daniela, aluguel: t.aluguel + m.aluguel, juridico: t.juridico + m.juridico, outros: t.outros + m.outros, aReceber: t.aReceber + m.aReceber, haverMes: t.haverMes + m.haverMes,
   }), vazio());
   return { meses, total, acumulado };
 }
@@ -862,15 +865,13 @@ function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDele
           <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--ink-soft)" }}>Elisângela</p>
           <LinhaValor label="Salário de sócio" v={sel.elis.salario} />
           <LinhaValor label="Adiantamentos de pró-labore" v={sel.elis.adiantamentos} />
-          <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total que pegou" v={sel.elis.total} bold /></div>
         </div>
         <div className="p-4">
           <p className="text-xs uppercase tracking-wide mb-1" style={{ color: "var(--ink-soft)" }}>Gilmar</p>
           <LinhaValor label="Salário de sócio" v={sel.gil.salario} />
           <LinhaValor label="Adiantamentos de pró-labore" v={sel.gil.adiantamentos} />
           {sel.gil.foraCaixa > 0 && <p className="text-xs -mt-1 mb-1" style={{ color: "var(--ink-soft)" }}>inclui parcela celular: {fmtBRL(sel.gil.foraCaixa)}</p>}
-          {sel.gil.pagtoHaver > 0 && <LinhaValor label="Pagamentos do haver" v={sel.gil.pagtoHaver} />}
-          <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total que pegou" v={sel.gil.total} bold /></div>
+
         </div>
 
         <div className="md:col-span-2 p-4" style={{ borderTop: "1px solid var(--line)", background: "var(--paper)" }}>
@@ -879,7 +880,10 @@ function SociosRetiradasCard({ extras, transactions, canEdit, onAddExtra, onDele
           <LinhaValor label="Aluguel alojamento Telêmaco" v={sel.aluguel} />
           <LinhaValor label="Reembolso jurídico Rafaela" v={sel.juridico} />
           {sel.outros > 0 && <LinhaValor label="Outros" v={sel.outros} />}
-          <LinhaValor label={sel.diferenca >= 0 ? "Diferença de salário + adiantamentos" : "Diferença de salário + adiantamentos (Gilmar pegou mais)"} v={sel.diferenca} tone={sel.diferenca < 0 ? "var(--red)" : undefined} />
+          <div style={{ borderTop: "1px solid var(--line)" }}><LinhaValor label="Total a receber a mais" v={sel.aReceber} bold /></div>
+          {sel.gil.pagtoHaver > 0 && <LinhaValor label="(-) Já pago ao Gilmar (pagamento do haver)" v={-sel.gil.pagtoHaver} tone="var(--red)" />}
+          {Math.abs(sel.diferenca) >= 0.01 && <LinhaValor label={sel.diferenca > 0 ? "(+) Elisângela pegou mais adiantamento de pró-labore" : "(-) Gilmar pegou mais adiantamento de pró-labore"} v={sel.diferenca} tone={sel.diferenca < 0 ? "var(--red)" : undefined} />}
+          <p className="text-xs mt-1" style={{ color: "var(--ink-soft)" }}>O salário de sócio é igual para os dois e não entra nessa conta.</p>
         </div>
 
         <div className="md:col-span-2 px-4 py-3 flex items-end justify-between flex-wrap gap-2" style={{ background: "var(--navy)", color: "#fff" }}>
